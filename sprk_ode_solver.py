@@ -3,9 +3,10 @@ import torch
 import numpy as np
 
 class SprkAdjoint:
-  def __init__(self) -> None:
+  def __init__(self, dt = 0.01) -> None:
     self.stages = 0
     self.order = 0
+    self.h_max = dt
     
   def solve_forward(self, z0, t0, t1, f):
     pass
@@ -13,16 +14,44 @@ class SprkAdjoint:
   def solve_backward(self, z0, t0, t1, f):
     pass
     
+
+class ForwardEuler(SprkAdjoint):
+  def __init__(self, dt = 0.05) -> None:
+    self.stages = 1
+    self.order = 1
+    self.h_max = dt
+
+  def solve_forward(self, z0, t0, t1, f):
+    return self.ode_solve(z0, t0, t1, f), [], []
+
+  def solve_backward(self, z0, t0, t1, f):
+    return self.ode_solve(z0, t0, t1, f)
+
+  def ode_solve(self, z0, t0, t1, f):
+      """
+      Simplest Euler ODE initial value solver
+      """
+      n_steps = math.ceil((abs(t1 - t0)/self.h_max).max().item())
+
+      h = (t1 - t0)/n_steps
+      t = t0
+      z = z0
+
+      for i_step in range(n_steps):
+          z = z + h * f(z, t)
+          t = t + h
+      return z
+
 class Leapfrog(SprkAdjoint):
-  def __init__(self) -> None:
+  def __init__(self, dt = 0.05) -> None:
     self.stages = 2
     self.order = 2
+    self.h_max = dt
     self.fcoeffs = torch.tensor([0.5, 0.5], dtype=torch.float64)
     self.bcoeffs = torch.tensor([0.0, 1.0], dtype=torch.float64)
   
   def solve_forward(self, z0, t0, t1, f):
-    h_max = 0.05
-    n_steps = math.ceil((abs(t1 - t0)/h_max).max().item())
+    n_steps = math.ceil((abs(t1 - t0)/self.h_max).max().item())
 
     assert t1 > t0, 'solve_forward only solves forward in time'
 
@@ -41,8 +70,7 @@ class Leapfrog(SprkAdjoint):
     return z, X1, X2
 
   def solve_backward(self, z0, t0, t1, f):
-    h_max = 0.05
-    n_steps = math.ceil((abs(t1 - t0)/h_max).max().item())
+    n_steps = math.ceil((abs(t1 - t0)/self.h_max).max().item())
 
     assert t0 > t1, 'solve_backward only solves backward in time'
 
