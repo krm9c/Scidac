@@ -127,3 +127,10 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# spack
+spack.lock
+.spack-env/
+
+# editors
+.vscode
