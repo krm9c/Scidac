@@ -1,10 +1,12 @@
 import torch
+import torch.multiprocessing as mp
 from torch import Tensor
 from torch import nn
-from torch.nn  import functional as F 
+from torch.nn  import functional as F
 from torch.autograd import Variable
 import math
-
+import os
+import itertools
 
 import numpy as np
 from tqdm import tqdm_notebook as tqdm
@@ -111,7 +113,7 @@ class ODEAdjoint(torch.autograd.Function):
 
             # Flatten f and adfdz
             func_eval = func_eval.view(bs, n_dim)
-            adfdz = adfdz.view(bs, n_dim) 
+            adfdz = adfdz.view(bs, n_dim)
             return torch.cat((func_eval, -adfdz, -adfdp, -adfdt), dim=1)
 
         dLdz = dLdz.view(time_len, bs, n_dim)  # flatten dLdz for convenience
@@ -150,7 +152,7 @@ class ODEAdjoint(torch.autograd.Function):
                 del aug_z, aug_ans
 
             ## Adjust 0 time adjoint with direct gradients
-            # Compute direct gradients 
+            # Compute direct gradients
             dLdz_0 = dLdz[0]
             dLdt_0 = torch.bmm(torch.transpose(dLdz_0.unsqueeze(-1), 1, 2), f_i.unsqueeze(-1))[:, 0]
 
@@ -173,13 +175,13 @@ class NeuralODE(nn.Module):
             return z
         else:
             return z[-1]
-        
+
 
 class NNODEF(ODEF):
     def __init__(self, in_dim, hid_dim, time_invariant=False):
         super(NNODEF, self).__init__()
         self.time_invariant = time_invariant
-        
+
         if time_invariant:
             self.lin1 = nn.Linear(in_dim, hid_dim)
         else:
@@ -197,7 +199,7 @@ class NNODEF(ODEF):
         h = self.elu(self.lin2(h))
         out = self.lin3(h)
         return out
-    
+
 
 
 class RNNEncoder(nn.Module):
@@ -288,7 +290,7 @@ def create_batch_latent_order(X, y, N_Max):
         np.float32).reshape([1, -1]), obs_.shape[0], axis=0)).unsqueeze(2)
     return obs_, ts_, ho_
 
-def conduct_experiment_latent(X, ode_trained, n_steps, print_iter):
+def conduct_experiment_latent(X, step_model_optimizer_loss, save_path, device='cpu', epochs=5000, save_iter=1000, print_iter=100):
     z0 = Variable(torch.Tensor([[0.6, 0.3]]))
     E = X[()]['data'][:, 1:]
     h_omega = X[()]['data'][:, 0]/50
@@ -299,27 +301,37 @@ def conduct_experiment_latent(X, ode_trained, n_steps, print_iter):
     ETr = E[permutation]
     h_omegaT = h_omega[permutation]
     # Train Neural ODE
-    optimizer = torch.optim.Adam(ode_trained.parameters(), lr=1e-3)
-    for i in range(n_steps):
+    prev_epoch, ode_trained, optimizer, prev_loss = step_model_optimizer_loss
+    print("Starting training from epoch ", prev_epoch, flush=True)
+    for i in range(prev_epoch, epochs):
         obs_, ts_, ho_ = create_batch_latent(ETr, h_omegaT, N_Max)
-        input_d = torch.cat( [obs_, ho_], axis=2)
-        x_p, z, z_mean, z_log_var = ode_trained(input_d, ts_)
+        input_d = torch.cat( [obs_, ho_], axis=2).to(device)
+        x_p, z, z_mean, z_log_var = ode_trained(input_d, ts_.to(device))
         kl_loss = -0.5 * torch.sum(1 + z_log_var - z_mean**2 - torch.exp(z_log_var), -1)
         error_loss = 0.5 * ((input_d-x_p)**2).sum(-1).sum(0) / noise_std**2
         loss = torch.mean(error_loss+ kl_loss)
         optimizer.zero_grad()
         loss.backward(retain_graph=True)
         optimizer.step()
-        if i %1000 == 0:
-            print("Step:", i, "Total_Loss:"+str(loss.item()) + " with error", str(torch.mean(error_loss).item())+\
-                  " KL divergence" + str(torch.mean(kl_loss).item()))
         if i % print_iter == 0:
+            print("(Print) Epoch:", i, "Total_Loss: "+str(loss.item()) + " with error", str(torch.mean(error_loss).item())+\
+                  " KL divergence " + str(torch.mean(kl_loss).item()), flush=True)
+        if i % save_iter == 0 or i == (epochs-1):
+            print("(Save) Epoch:", i, "Total_Loss: "+str(loss.item()) + " with error", str(torch.mean(error_loss).item())+\
+                  " KL divergence " + str(torch.mean(kl_loss).item()), flush=True)
+            torch.save({
+                'step': i,
+                'model_state_dict': ode_trained.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'loss': loss
+                },
+                save_path)
             obs_, ts_, ho_ = create_batch_latent_order(E, h_omega, N_Max)
             input_d = torch.cat([obs_, ho_], axis=2)
             samp_trajs_p = to_np(ode_trained.generate_with_seed(input_d, ts_))
-            print(samp_trajs_p.shape)
-            
-            plt.figure()            
+            #print(samp_trajs_p.shape)
+
+            plt.figure()
             fig, axes = plt.subplots(nrows=3, ncols=6, facecolor='white', figsize=(9, 9),\
                     gridspec_kw={'wspace': 0.5, 'hspace': 0.5}, dpi=400)
             axes = axes.flatten()
@@ -338,25 +350,25 @@ def conduct_experiment_latent(X, ode_trained, n_steps, print_iter):
             plt.text(20, 75, "\n Total loss: "+str(np.round(loss.item(), 2)) + "\n with error: "\
                 + str(np.round(torch.mean(error_loss).item(), 2))+" \n KL divergence: " + str(np.round(torch.mean(kl_loss).item(), 2)))
             plt.savefig('Figures/training/reconstruction_'+str(i)+'.png', dpi= 300,  bbox_inches="tight")
+            plt.close()
 
 
 
 ########################################################################
-## Plot the first one 
+## Plot the first one
 def plot_homega_average_(n_models, X):
     traj_mean = []
     traj_var = []
     E = X[()]['data'][:, 1:]
-    h_omega = X[()]['data'][:, 0]/50    
+    h_omega = X[()]['data'][:, 0]/50
     N_Max = X[()]['Nmax'].reshape([-1])/18
     obs_, ts_, ho_ = create_batch_latent_order(E, h_omega, N_Max)
     input_d = torch.cat([obs_, ho_], axis=2)
-    
+
 
     for i in range(n_models):
-        ode_trained = ODEVAE(2, 128, 6) 
         PATH = 'models/Trained_ode_'+str(i)
-        ode_trained.load_state_dict(torch.load(PATH))
+        _, ode_trained, _, _ = load_checkpoint(PATH)
         samp_trajs_p = to_np(ode_trained.generate_with_seed(input_d, ts_))
         traj_mean.append( np.mean(samp_trajs_p, axis = 1) )
         traj_var.append(np.std(samp_trajs_p, axis=1)**2)
@@ -365,8 +377,7 @@ def plot_homega_average_(n_models, X):
     traj_mean = np.array(traj_mean)
     traj_var = np.array(traj_var)
     mu = np.mean(traj_mean, axis = 0)
-    var = np.mean(traj_var, axis = 0)     
-    print(mu.shape, var.shape)        
+    var = np.mean(traj_var, axis = 0)
     fig, axes = plt.subplots(nrows=1, ncols=1, facecolor='white', figsize=(
     8, 3),  gridspec_kw={'wspace': 0.5, 'hspace': 0.5}, dpi=400)
     axes.scatter((18*ts_[:,0, 0]).reshape([-1,1]),  mu[:,0],  label="predicted",\
@@ -379,6 +390,7 @@ def plot_homega_average_(n_models, X):
     axes.set_ylabel('Ground state Energy', fontsize=10)
     plt.title("Ground State Energy averaged w.r.t. $\\overline{h} \\Omega$")
     plt.savefig('Figures/reconstruction_extrapolation_averaged_homega__.png', dpi=300,  bbox_inches="tight")
+    plt.close()
 
 
 def plot_model_averaged_(n_models, X):
@@ -389,9 +401,8 @@ def plot_model_averaged_(n_models, X):
     obs_, ts_, ho_ = create_batch_latent_order(E, h_omega, N_Max)
     input_d = torch.cat([obs_, ho_], axis=2)
     for i in range(n_models):
-        ode_trained = ODEVAE(2, 128, 6)
         PATH = 'models/Trained_ode_'+str(i)
-        ode_trained.load_state_dict(torch.load(PATH))
+        step, ode_trained, _, _ = load_checkpoint(PATH)
         samp_trajs_p = to_np(ode_trained.generate_with_seed(input_d, ts_))
         traj.append(samp_trajs_p[:, :, 0])
 
@@ -418,22 +429,61 @@ def plot_model_averaged_(n_models, X):
             ax.set_title("Ground State Energy averaged  w.r.t. models")
         ax.set_ylim([-15, -33])
         # ax.set_xlim([-35,0])
-    
+
     plt.savefig('Figures/reconstruction_extrapolation_model_averaged__.png',
                 dpi=300,  bbox_inches="tight")
+    plt.close()
 
 
+def load_checkpoint(path):
+    step = 0
+    loss = 0
+    model = ODEVAE(2, 128, 6)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    if os.path.exists(path):
+        checkpoint = torch.load(PATH)
+        step = checkpoint['step']
+        loss = checkpoint['loss']
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    return step, model, optimizer, loss
 
-## The main run loop 
-X = np.load('data/processed_extrapolation.npy', allow_pickle=True)
-use_cuda = torch.cuda.is_available()
-odes = []
-n_models__ = 3
-for i in range(n_models__):
-    odes.append(ODEVAE(2, 128, 6))
-for (i, element) in enumerate(odes):
-    conduct_experiment_latent(X, element, 100, print_iter=2000)
-    torch.save(element.state_dict(), 'models/Trained_ode_'+str(i))
 
-plot_homega_average_(n_models__, X)
-plot_model_averaged_(n_models__, X)
+def train_model(stuff):
+    i, model, device = stuff
+    PATH = 'models/Trained_ode_'+str(i)
+    X = np.load('data/processed_extrapolation.npy', allow_pickle=True)
+    print(F'Launch training of model {i} on process {mp.current_process().pid}', flush=True)
+    conduct_experiment_latent(X, model, PATH, device=device, epochs=30000, save_iter=100, print_iter=10)
+
+
+## The main run loop
+if __name__ == '__main__':
+    mp.set_start_method('spawn')
+    use_cuda = torch.cuda.is_available()
+    use_cuda = False
+    if use_cuda:
+        devices = [torch.device('cuda:%d'%i) for i in range(torch.cuda.device_count())]
+        num_devices = len(devices)
+        num_processes = num_devices
+    else:
+        num_processes = 1
+        devices = [torch.device('cpu')] * num_processes
+        num_devices = len(devices)
+    print(F'use_cuda = {use_cuda}, num_devices = {num_devices}, num_processes = {num_processes}', flush=True)
+
+    odes = []
+    n_models__ = 100
+    for i in range(n_models__):
+        PATH = 'models/Trained_ode_'+str(i)
+        checkpoint = load_checkpoint(PATH)
+        checkpoint[1].to(devices[i%num_devices])
+        odes.append(checkpoint)
+    stuff = zip(range(len(odes)), odes, itertools.cycle(devices))
+    with mp.Pool(num_processes) as pool:
+        pool.map(train_model, stuff)
+
+    X = np.load('data/processed_extrapolation.npy', allow_pickle=True)
+    plot_homega_average_(n_models__, X)
+    plot_model_averaged_(n_models__, X)
+

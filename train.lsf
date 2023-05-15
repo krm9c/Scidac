@@ -1,0 +1,9 @@
+#!/bin/bash
+#BSUB -W 4:00
+#BSUB -nnodes 1
+#BSUB -J train_abinitio
+
+date
+#source /g/g13/balos1/Workspaces/nuclei-ai/pytorch.profile
+jsrun -n1 -r1 -a1 -c40 -g2 python test_models.py
+
