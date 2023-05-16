@@ -4,6 +4,9 @@
 #BSUB -J train_abinitio
 
 date
-#source /g/g13/balos1/Workspaces/nuclei-ai/pytorch.profile
-jsrun -n1 -r1 -a1 -c40 -g2 python test_models.py
 
+# cpu
+jsrun -n1 -r1 -a1 -c40 -g1 python test_models.py
+
+# gpu
+jsrun -n1 -r1 -a1 -c40 -g4 python test_models.py

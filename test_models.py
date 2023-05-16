@@ -316,7 +316,7 @@ def conduct_experiment_latent(X, step_model_optimizer_loss, save_path, device='c
         if i % print_iter == 0:
             print("(Print) Epoch:", i, "Total_Loss: "+str(loss.item()) + " with error", str(torch.mean(error_loss).item())+\
                   " KL divergence " + str(torch.mean(kl_loss).item()), flush=True)
-        if i % save_iter == 0 or i == (epochs-1):
+        if i % save_iter == 0 or i == epochs:
             print("(Save) Epoch:", i, "Total_Loss: "+str(loss.item()) + " with error", str(torch.mean(error_loss).item())+\
                   " KL divergence " + str(torch.mean(kl_loss).item()), flush=True)
             torch.save({
@@ -327,8 +327,8 @@ def conduct_experiment_latent(X, step_model_optimizer_loss, save_path, device='c
                 },
                 save_path)
             obs_, ts_, ho_ = create_batch_latent_order(E, h_omega, N_Max)
-            input_d = torch.cat([obs_, ho_], axis=2)
-            samp_trajs_p = to_np(ode_trained.generate_with_seed(input_d, ts_))
+            input_d = torch.cat([obs_, ho_], axis=2).to(device)
+            samp_trajs_p = to_np(ode_trained.generate_with_seed(input_d, ts_.to(device)))
             #print(samp_trajs_p.shape)
 
             plt.figure()
@@ -336,7 +336,7 @@ def conduct_experiment_latent(X, step_model_optimizer_loss, save_path, device='c
                     gridspec_kw={'wspace': 0.5, 'hspace': 0.5}, dpi=400)
             axes = axes.flatten()
             for j, ax in enumerate(axes):
-                ax.plot(18*ts_[:, j, 0], input_d[:, j, 0], label='real', linewidth = 1)
+                ax.plot(18*to_np(ts_[:, j, 0]), to_np(input_d[:, j, 0]), label='real', linewidth = 1)
                 ax.scatter(18*ts_[:, j, 0], samp_trajs_p[:, j, 0], 3,
                            label="predicted" , marker='*',
                            c=samp_trajs_p[:, j, 0], cmap=cm.plasma)
@@ -435,10 +435,11 @@ def plot_model_averaged_(n_models, X):
     plt.close()
 
 
-def load_checkpoint(path):
+def load_checkpoint(path, device='cpu'):
     step = 0
     loss = 0
     model = ODEVAE(2, 128, 6)
+    model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     if os.path.exists(path):
         checkpoint = torch.load(PATH)
@@ -461,9 +462,9 @@ def train_model(stuff):
 if __name__ == '__main__':
     mp.set_start_method('spawn')
     use_cuda = torch.cuda.is_available()
-    use_cuda = False
+    use_cuda = True
     if use_cuda:
-        devices = [torch.device('cuda:%d'%i) for i in range(torch.cuda.device_count())]
+        devices = [torch.device('cuda:%d' % i) for i in range(torch.cuda.device_count())]
         num_devices = len(devices)
         num_processes = num_devices
     else:
@@ -476,8 +477,7 @@ if __name__ == '__main__':
     n_models__ = 100
     for i in range(n_models__):
         PATH = 'models/Trained_ode_'+str(i)
-        checkpoint = load_checkpoint(PATH)
-        checkpoint[1].to(devices[i%num_devices])
+        checkpoint = load_checkpoint(PATH, device=devices[i % num_devices])
         odes.append(checkpoint)
     stuff = zip(range(len(odes)), odes, itertools.cycle(devices))
     with mp.Pool(num_processes) as pool:
