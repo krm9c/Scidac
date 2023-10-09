@@ -6,37 +6,48 @@ from odesolver import ForwardEuler, RRK
 
 # Harmonic Oscillator with Quartic Entropy/Energy
 class HarmonicOscillator:
-  def f(w, t=0.):
-      return torch.tensor([-w[1], w[0]])
+    def f(w, t=0.0):
+        return torch.tensor([-w[1], w[0]])
 
-  def eta(w):
-      return torch.tensor([w[0]*w[0]*w[0]*w[0] + 2 * w[0]*w[0] * w[1]*w[1] + w[1]*w[1]*w[1]*w[1]])
+    def eta(w):
+        return torch.tensor(
+            [
+                w[0] * w[0] * w[0] * w[0]
+                + 2 * w[0] * w[0] * w[1] * w[1]
+                + w[1] * w[1] * w[1] * w[1]
+            ]
+        )
 
-  def deta(w):
-      return torch.tensor([4*w[0]*w[0]*w[0] + 4*w[0]*w[1]*w[1], 4*w[1]*w[1]*w[1] + 4*w[1]*w[0]*w[0]])
+    def deta(w):
+        return torch.tensor(
+            [
+                4 * w[0] * w[0] * w[0] + 4 * w[0] * w[1] * w[1],
+                4 * w[1] * w[1] * w[1] + 4 * w[1] * w[0] * w[0],
+            ]
+        )
 
-  def u_analytical(t):
-      w0 = torch.cos(t)
-      w1 = torch.sin(t)
-      return torch.tensor([w0, w1])
+    def u_analytical(t):
+        w0 = torch.cos(t)
+        w1 = torch.sin(t)
+        return torch.tensor([w0, w1])
 
 
 ## Solve forward
 
-print(' \n-- Solving forward --\n ')
+print(" \n-- Solving forward --\n ")
 
 
-TEND = 1000.
+TEND = 1000.0
 
-u0 = torch.tensor([1., 0.])
+u0 = torch.tensor([1.0, 0.0])
 dt = 0.1
-t0 = torch.tensor([0.])
+t0 = torch.tensor([0.0])
 tf = torch.tensor([TEND])
 
-fe = rk.loadRKM('FE').__num__()
-trap = rk.loadRKM('SSP22').__num__()
-rk4 = rk.loadRKM('RK44').__num__()
-ode_solver = RRK(h_max=dt, rkm=rk4, relaxation=True, rescale_step=True)
+fe = rk.loadRKM("FE").__num__()
+trap = rk.loadRKM("SSP22").__num__()
+rk4 = rk.loadRKM("RK44").__num__()
+ode_solver = RRK(h_max=dt, rkm=rk4, relaxation=True, rescale_step=True, store_sol=True)
 
 tt, uu = ode_solver.solve(u0, t0, tf, HarmonicOscillator.f)
 
@@ -46,17 +57,28 @@ tt, uu = ode_solver.solve(u0, t0, tf, HarmonicOscillator.f)
 # plt.plot(tt, H - H[0]);
 # plt.xlabel("$t$"); plt.ylabel("$\eta(u_\mathrm{num}(t)) - \eta(u_0)$"); plt.xlim(tt[0], tt[-1]);
 
-print('u(t_0) = ', uu[:,0])
-print('u(t_f) = ', uu[:,-1])
-print("Error at tf: %.3e" % np.linalg.norm(uu[:,-1] - HarmonicOscillator.u_analytical(tt[-1])))
-print("Pointwise mean error: %.3e" % np.mean( [np.linalg.norm(uu[:,i] - HarmonicOscillator.u_analytical(tt[i])) for i in range(tt.size(dim=0))] ))
+print("u(t_0) = ", uu[:, 0])
+print("u(t_f) = ", uu[:, -1])
+print(
+    "Error at tf: %.3e"
+    % np.linalg.norm(uu[:, -1] - HarmonicOscillator.u_analytical(tt[-1]))
+)
+print(
+    "Pointwise mean error: %.3e"
+    % np.mean(
+        [
+            np.linalg.norm(uu[:, i] - HarmonicOscillator.u_analytical(tt[i]))
+            for i in range(tt.size(dim=0))
+        ]
+    )
+)
 
-print(' \n-- Solving backward --\n ')
+print(" \n-- Solving backward --\n ")
 
 ## Solve backward
 
 u0 = uu[:, -1]
-tf = torch.tensor([0.])
+tf = torch.tensor([0.0])
 t0 = torch.tensor([TEND])
 
 tt, uu_bwd = ode_solver.solve(u0, t0, tf, HarmonicOscillator.f)
@@ -67,7 +89,18 @@ tt, uu_bwd = ode_solver.solve(u0, t0, tf, HarmonicOscillator.f)
 # plt.plot(tt, H - H[0]);
 # plt.xlabel("$t$"); plt.ylabel("$\eta(u_\mathrm{num}(t)) - \eta(u_0)$"); plt.xlim(tt[0], tt[-1]);
 
-print('u(t_0) = ', uu_bwd[:,-1])
-print('u(t_f) = ', uu_bwd[:,0])
-print("Error at t0: %.3e" % np.linalg.norm(uu_bwd[:,-1] - HarmonicOscillator.u_analytical(tt[-1])))
-print("Pointwise mean error: %.3e" % np.mean( [np.linalg.norm(uu_bwd[:,i] - HarmonicOscillator.u_analytical(tt[i])) for i in range(tt.size(dim=0))] ))
+print("u(t_0) = ", uu_bwd[:, -1])
+print("u(t_f) = ", uu_bwd[:, 0])
+print(
+    "Error at t0: %.3e"
+    % np.linalg.norm(uu_bwd[:, -1] - HarmonicOscillator.u_analytical(tt[-1]))
+)
+print(
+    "Pointwise mean error: %.3e"
+    % np.mean(
+        [
+            np.linalg.norm(uu_bwd[:, i] - HarmonicOscillator.u_analytical(tt[i]))
+            for i in range(tt.size(dim=0))
+        ]
+    )
+)

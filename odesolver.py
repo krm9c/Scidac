@@ -1,27 +1,3 @@
-"""
-MIT License
-
-Copyright (c) 2019 David I. Ketcheson and Hendrik Ranocha
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-"""
-
 from abc import ABC, abstractmethod
 import math
 import torch
@@ -37,26 +13,31 @@ class ODESolver(ABC):
 
 
 class ForwardEuler(ODESolver):
-    def __init__(self, h_max):
+    def __init__(self, h_max, store_sol):
         self.h_max = h_max
+        self.store_sol = store_sol
 
     def solve(self, z0, t0, tf, f):
-        device = z0.get_device()
+        device = z0.device
         h_max = self.h_max
         n_steps = math.ceil((abs(tf - t0) / h_max).max().item())
         h = (tf - t0) / n_steps
         t = t0
-        tt = [t.detach().clone()]
         z = z0.detach().clone()
-        zz = torch.zeros([len(z0), n_steps + 1]).to(device)
-        zz[:, 0] = z.detach().clone()
+        if self.store_sol:
+            tt = [t.detach().clone()]
+            zz = torch.zeros([len(z0), n_steps + 1]).to(device)
+            zz[:, 0] = z.detach().clone()
         for ii in range(n_steps):
             z = z + h * f(z, t)
             t = t + h
-            if store_sol:
+            if self.store_sol:
                 zz[:, ii] = z.detach().clone()
                 tt.append(t.detach().clone())
-        return z
+        if self.store_sol:
+            return torch.cat(tt).to(device), zz[:, : ii + 1]
+        else:
+            return z
 
 
 class RRK(ODESolver):
@@ -66,11 +47,13 @@ class RRK(ODESolver):
         rkm=rk.loadRKM("RK44").__num__(),
         relaxation=True,
         rescale_step=True,
+        store_sol=False,
     ):
         self.rkm = rkm
         self.h_max = h_max
         self.relaxation = relaxation
         self.rescale_step = rescale_step
+        self.store_sol = store_sol
 
     def solve(self, z0, t0, tf, f):
         n_steps = math.ceil((abs(tf - t0) / self.h_max).max().item())
@@ -84,6 +67,7 @@ class RRK(ODESolver):
             t_final=tf,
             relaxation=self.relaxation,
             rescale_step=self.rescale_step,
+            store_sol=self.store_sol,
         )
 
     def advance(
@@ -95,6 +79,7 @@ class RRK(ODESolver):
         t_final=1.0,
         relaxation=True,
         rescale_step=True,
+        store_sol=False,
         debug=False,
         gammatol=0.1,
         print_gamma=False,
@@ -102,6 +87,11 @@ class RRK(ODESolver):
         dissip_factor=1.0,
     ):
         """
+        Original source attibution:
+            Copyright (c) 2019 David I. Ketcheson and Hendrik Ranocha.
+
+        Modified by Cody Balos.
+            
         Relaxation Runge-Kutta method implementation.
         
         Options:
@@ -118,10 +108,8 @@ class RRK(ODESolver):
             gammatol: Fail if abs(1-gamma) exceeds this value
             
         """
-        device = w0.get_device()
-        store_sol = False
+        device = w0.device
         t = t_init
-        tt = [t.detach().clone()]
         w = w0.detach().clone()
         if store_sol:
             # We pre-allocate extra space because if rescale_step==True then
@@ -130,6 +118,7 @@ class RRK(ODESolver):
                 [*w0.shape, int(abs(t_final - t) / abs(dt) * 2.5) + 10000]
             ).to(device)
             ww[:, 0] = w.detach().clone()
+            tt = [t.detach().clone()]
         ii = 0
         s = len(rkm)
         A = torch.tensor(rkm.A).to(device)
@@ -152,12 +141,12 @@ class RRK(ODESolver):
 
             if relaxation:
                 numer = 2 * sum(
-                    b[i] * rkm.A[i, j] * torch.tensordot(F[i], F[j])
+                    b[i] * A[i, j] * torch.tensordot(F[i], F[j], dims=F[i].dim())
                     for i in range(s)
                     for j in range(s)
                 )
                 denom = sum(
-                    b[i] * b[j] * torch.tensordot(F[i], F[j])
+                    b[i] * b[j] * torch.tensordot(F[i], F[j], dims=F[i].dim())
                     for i in range(s)
                     for j in range(s)
                 )
@@ -181,9 +170,9 @@ class RRK(ODESolver):
             else:
                 t += dt
             ii += 1
-            tt.append(t.detach().clone())
             if store_sol:
-                ww[:, :, ii] = w.detach().clone()
+                tt.append(t.detach().clone())
+                ww[:, ii] = w.detach().clone()
             if debug:
                 gm1 = torch.abs(1.0 - gam)
                 max_gammam1 = max(max_gammam1, gm1)
@@ -195,5 +184,7 @@ class RRK(ODESolver):
         if debug:
             print(max_gammam1)
             return torch.cat(tt), ww[:, : ii + 1], torch.cat(gams)
+        elif store_sol:
+            return torch.cat(tt), ww[:, : ii + 1]
         else:
             return w
