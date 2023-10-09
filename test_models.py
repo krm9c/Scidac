@@ -309,7 +309,6 @@ if __name__ == '__main__':
 
     mp.set_start_method('spawn')
     use_cuda = torch.cuda.is_available()
-    print(torch.cuda.device_count())
     
     # use_cuda = True
     if use_cuda:

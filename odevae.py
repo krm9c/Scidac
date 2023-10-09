@@ -1,28 +1,11 @@
 import torch
 from torch import Tensor
 from torch import nn
-import math
 import numpy as np
 from odesolver import ForwardEuler, RRK
 
-# def Entropy(z, zhat, int_coeff = 1):
-#     """
-#     z: 
-#     zhat: 
-#     int_coeff: 
-#     """
-#     return np.sum(zhat-z-zhat*np.log( np.divide(zhat,z) ) , axis = 1)
-
-# def dEntropy(z, zhat, int_coeff = 1):
-#     """
-#     d/dt Entropy
-#     """
-#     e = Entropy(z, zhat, int_coeff)
-#     e.backward()
-#     return e.grad
-
-ode_solver = ForwardEuler(h_max=0.01)
-# ode_solver = RRK(h_max=0.01)
+# ode_solver = ForwardEuler(h_max=0.01)
+ode_solver = RRK(h_max=0.1)
 
 ## Let us now figure out how to get a model.
 class ODEF(nn.Module):
@@ -63,7 +46,7 @@ class ODEAdjoint(torch.autograd.Function):
             z = torch.zeros(time_len, bs, *z_shape).to(z0)
             z[0] = z0
             for i_t in range(time_len - 1):
-                z0 = ode_solver.solve(z0, t[i_t], t[i_t+1], func)
+                z0 = ode_solver.solve(z0, t[i_t,0,:], t[i_t+1,0,:], func)
                 z[i_t+1] = z0
 
         ctx.func = func
@@ -132,7 +115,7 @@ class ODEAdjoint(torch.autograd.Function):
                 aug_z = torch.cat((z_i.view(bs, n_dim), adj_z, torch.zeros(bs, n_params).to(z), adj_t[i_t]), dim=-1)
 
                 # Solve augmented system backwards
-                aug_ans = ode_solver.solve(aug_z, t_i, t[i_t-1], augmented_dynamics)
+                aug_ans = ode_solver.solve(aug_z, t_i[0,:], t[i_t-1,0,:], augmented_dynamics)
 
                 # Unpack solved backwards augmented system
                 adj_z[:] = aug_ans[:, n_dim:2*n_dim]

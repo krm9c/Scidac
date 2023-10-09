@@ -6,7 +6,7 @@
 date
 
 # cpu
-jsrun -n1 -r1 -a1 -c40 -g1 python test_models.py
+# jsrun -n1 -r1 -a1 -c40 -g1 python test_models.py --train
 
 # gpu
-jsrun -n1 -r1 -a1 -c40 -g4 python test_models.py
+jsrun -n1 -r1 -a1 -c40 -g4 python test_models.py --train
