@@ -15,12 +15,15 @@ class ODEF(nn.Module):
         out = self.forward(z, t)
         a = grad_outputs
         adfdz, adfdt, *adfdp = torch.autograd.grad(
-            (out,), (z, t) + tuple(self.parameters()), grad_outputs=(a),
-            allow_unused=True, retain_graph=True)
+            (out,),
+            (z, t) + tuple(self.parameters()),
+            grad_outputs=(a),
+            allow_unused=True,
+            retain_graph=True,
+        )
         # grad method automatically sums gradients for batch items, we have to expand them back
         if adfdp is not None:
-            adfdp = torch.cat([p_grad.flatten()
-                              for p_grad in adfdp]).unsqueeze(0)
+            adfdp = torch.cat([p_grad.flatten() for p_grad in adfdp]).unsqueeze(0)
             adfdp = adfdp.expand(batch_size, -1) / batch_size
         if adfdt is not None:
             adfdt = adfdt.expand(batch_size, 1) / batch_size
@@ -46,8 +49,8 @@ class ODEAdjoint(torch.autograd.Function):
             z = torch.zeros(time_len, bs, *z_shape).to(z0)
             z[0] = z0
             for i_t in range(time_len - 1):
-                z0 = ode_solver.solve(z0, t[i_t,0,:], t[i_t+1,0,:], func)
-                z[i_t+1] = z0
+                z0 = ode_solver.solve(z0, t[i_t, 0, :], t[i_t + 1, 0, :], func)
+                z[i_t + 1] = z0
 
         ctx.func = func
         ctx.save_for_backward(t, z.clone(), flat_parameters)
@@ -71,7 +74,10 @@ class ODEAdjoint(torch.autograd.Function):
             t_i - is tensor with size: bs, 1
             aug_z_i - is tensor with size: bs, n_dim*2 + n_params + 1
             """
-            z_i, a = aug_z_i[:, :n_dim], aug_z_i[:, n_dim:2*n_dim]  # ignore parameters and time
+            z_i, a = (
+                aug_z_i[:, :n_dim],
+                aug_z_i[:, n_dim : 2 * n_dim],
+            )  # ignore parameters and time
 
             # Unflatten z and a
             z_i = z_i.view(bs, *z_shape)
@@ -79,10 +85,22 @@ class ODEAdjoint(torch.autograd.Function):
             with torch.set_grad_enabled(True):
                 t_i = t_i.detach().requires_grad_(True)
                 z_i = z_i.detach().requires_grad_(True)
-                func_eval, adfdz, adfdt, adfdp = func.forward_with_grad(z_i, t_i, grad_outputs=a)  # bs, *z_shape
-                adfdz = adfdz.to(z_i) if adfdz is not None else torch.zeros(bs, *z_shape).to(z_i)
-                adfdp = adfdp.to(z_i) if adfdp is not None else torch.zeros(bs, n_params).to(z_i)
-                adfdt = adfdt.to(z_i) if adfdt is not None else torch.zeros(bs, 1).to(z_i)
+                func_eval, adfdz, adfdt, adfdp = func.forward_with_grad(
+                    z_i, t_i, grad_outputs=a
+                )  # bs, *z_shape
+                adfdz = (
+                    adfdz.to(z_i)
+                    if adfdz is not None
+                    else torch.zeros(bs, *z_shape).to(z_i)
+                )
+                adfdp = (
+                    adfdp.to(z_i)
+                    if adfdp is not None
+                    else torch.zeros(bs, n_params).to(z_i)
+                )
+                adfdt = (
+                    adfdt.to(z_i) if adfdt is not None else torch.zeros(bs, 1).to(z_i)
+                )
 
             # Flatten f and adfdz
             func_eval = func_eval.view(bs, n_dim)
@@ -98,36 +116,50 @@ class ODEAdjoint(torch.autograd.Function):
             # In contrast to z and p we need to return gradients for all times
             adj_t = torch.zeros(time_len, bs, 1).to(dLdz)
 
-            for i_t in range(time_len-1, 0, -1):
+            for i_t in range(time_len - 1, 0, -1):
                 z_i = z[i_t]
                 t_i = t[i_t]
                 f_i = func(z_i, t_i).view(bs, n_dim)
 
                 # Compute direct gradients
                 dLdz_i = dLdz[i_t]
-                dLdt_i = torch.bmm(torch.transpose(dLdz_i.unsqueeze(-1), 1, 2), f_i.unsqueeze(-1))[:, 0]
+                dLdt_i = torch.bmm(
+                    torch.transpose(dLdz_i.unsqueeze(-1), 1, 2), f_i.unsqueeze(-1)
+                )[:, 0]
 
                 # Adjusting adjoints with direct gradients
                 adj_z += dLdz_i
                 adj_t[i_t] = adj_t[i_t] - dLdt_i
 
                 # Pack augmented variable
-                aug_z = torch.cat((z_i.view(bs, n_dim), adj_z, torch.zeros(bs, n_params).to(z), adj_t[i_t]), dim=-1)
+                aug_z = torch.cat(
+                    (
+                        z_i.view(bs, n_dim),
+                        adj_z,
+                        torch.zeros(bs, n_params).to(z),
+                        adj_t[i_t],
+                    ),
+                    dim=-1,
+                )
 
                 # Solve augmented system backwards
-                aug_ans = ode_solver.solve(aug_z, t_i[0,:], t[i_t-1,0,:], augmented_dynamics)
+                aug_ans = ode_solver.solve(
+                    aug_z, t_i[0, :], t[i_t - 1, 0, :], augmented_dynamics
+                )
 
                 # Unpack solved backwards augmented system
-                adj_z[:] = aug_ans[:, n_dim:2*n_dim]
-                adj_p[:] += aug_ans[:, 2*n_dim:2*n_dim + n_params]
-                adj_t[i_t-1] = aug_ans[:, 2*n_dim + n_params:]
+                adj_z[:] = aug_ans[:, n_dim : 2 * n_dim]
+                adj_p[:] += aug_ans[:, 2 * n_dim : 2 * n_dim + n_params]
+                adj_t[i_t - 1] = aug_ans[:, 2 * n_dim + n_params :]
 
                 del aug_z, aug_ans
 
             ## Adjust 0 time adjoint with direct gradients
             # Compute direct gradients
             dLdz_0 = dLdz[0]
-            dLdt_0 = torch.bmm(torch.transpose(dLdz_0.unsqueeze(-1), 1, 2), f_i.unsqueeze(-1))[:, 0]
+            dLdt_0 = torch.bmm(
+                torch.transpose(dLdz_0.unsqueeze(-1), 1, 2), f_i.unsqueeze(-1)
+            )[:, 0]
 
             # Adjust adjoints
             adj_z += dLdz_0
@@ -141,7 +173,7 @@ class NeuralODE(nn.Module):
         assert isinstance(func, ODEF)
         self.func = func
 
-    def forward(self, z0, t=Tensor([0., 1.]), return_whole_sequence=False):
+    def forward(self, z0, t=Tensor([0.0, 1.0]), return_whole_sequence=False):
         t = t.to(z0)
         # print("the data", t, t.size(), z0.size())
         z = ODEAdjoint.apply(z0, t, self.func.flatten_parameters(), self.func)
@@ -159,20 +191,21 @@ class NNODEF(ODEF):
         if time_invariant:
             self.lin1 = nn.Linear(in_dim, hid_dim)
         else:
-            self.lin1 = nn.Linear(in_dim+1, hid_dim)
-        self.lin2     = nn.Linear(hid_dim, hid_dim)
-        self.lin3     = nn.Linear(hid_dim, in_dim)
-        self.elu      = nn.ELU(inplace=True)
+            self.lin1 = nn.Linear(in_dim + 1, hid_dim)
+        self.lin2 = nn.Linear(hid_dim, hid_dim)
+        self.lin3 = nn.Linear(hid_dim, in_dim)
+        self.elu = nn.ELU(inplace=True)
 
     def forward(self, x, t):
         # print(x.shape, t.shape)
         if not self.time_invariant:
-            x = torch.cat((x, t.reshape([1,-1]) ), dim=-1)
+            x = torch.cat((x, t.reshape([1, -1])), dim=-1)
         # print(x.shape)
         h = self.elu(self.lin1(x))
         h = self.elu(self.lin2(h))
         out = self.lin3(h)
         return out
+
 
 class RNNEncoder(nn.Module):
     def __init__(self, input_dim, hidden_dim, latent_dim):
@@ -181,22 +214,23 @@ class RNNEncoder(nn.Module):
         self.hidden_dim = hidden_dim
         self.latent_dim = latent_dim
 
-        self.rnn = nn.GRU(input_dim+1, hidden_dim)
-        self.hid2lat = nn.Linear(hidden_dim, 2*latent_dim)
+        self.rnn = nn.GRU(input_dim + 1, hidden_dim)
+        self.hid2lat = nn.Linear(hidden_dim, 2 * latent_dim)
 
     def forward(self, x, t):
         # Concatenate time to input
         t = t.clone()
         t[1:] = t[:-1] - t[1:]
-        t[0] = 0.
+        t[0] = 0.0
         xt = torch.cat((x, t), dim=-1)
 
         _, h0 = self.rnn(xt.flip((0,)))  # Reversed
         # Compute latent dimension
         z0 = self.hid2lat(h0[0])
-        z0_mean = z0[:, :self.latent_dim]
-        z0_log_var = z0[:, self.latent_dim:]
+        z0_mean = z0[:, : self.latent_dim]
+        z0_log_var = z0[:, self.latent_dim :]
         return z0_mean, z0_log_var
+
 
 class NeuralODEDecoder(nn.Module):
     def __init__(self, output_dim, hidden_dim, latent_dim):
