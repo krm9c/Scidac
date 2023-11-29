@@ -68,7 +68,6 @@ def conduct_experiment_latent(
     print("Starting training from epoch ", prev_epoch, flush=True)
     for i in range(prev_epoch, epochs):
         if i > 10000:
-            print(">>>> turn off relaxation")
             ode_trained.turnOffRelax()
         obs_, ts_, ho_ = create_batch_latent(ETr, h_omegaT, N_Max)
         input_d = torch.cat([obs_, ho_], axis=2).to(device)
@@ -174,138 +173,138 @@ def conduct_experiment_latent(
                 )
                 plt.close()
 
-    optimizer_BFGS = torch.optim.LBFGS(
-        ode_trained.parameters(), history_size=20, max_iter=2
-    )
+    # optimizer_BFGS = torch.optim.LBFGS(
+    #     ode_trained.parameters(), history_size=20, max_iter=2
+    # )
 
-    def closure():
-        x_p, _, _, _ = ode_trained(input_d, ts_.to(device))
-        error_loss = ((input_d - x_p) ** 2).sum(-1).sum(0) / noise_std ** 2
-        loss = torch.mean(error_loss)
-        optimizer_BFGS.zero_grad()
-        loss.backward()
-        return loss
+    # def closure():
+    #     x_p, _, _, _ = ode_trained(input_d, ts_.to(device))
+    #     error_loss = ((input_d - x_p) ** 2).sum(-1).sum(0) / noise_std ** 2
+    #     loss = torch.mean(error_loss)
+    #     optimizer_BFGS.zero_grad()
+    #     loss.backward()
+    #     return loss
 
-    obs_, ts_, ho_ = create_batch_latent(ETr, h_omegaT, N_Max)
-    input_d = torch.cat([obs_, ho_], axis=2).to(device)
-    copy_net = copy.deepcopy(ode_trained)
-    for i in range(500):
-        optimizer_BFGS.step(closure)
-        if torch.isnan(closure()):
-            print("The loss is nan, I am copying things")
-            ode_trained = copy.deepcopy(copy_net)
-            optimizer_BFGS = torch.optim.LBFGS(
-                ode_trained.parameters(), lr=0.1, history_size=10, max_iter=2
-            )
-        else:
-            copy_net = copy.deepcopy(ode_trained)
+    # obs_, ts_, ho_ = create_batch_latent(ETr, h_omegaT, N_Max)
+    # input_d = torch.cat([obs_, ho_], axis=2).to(device)
+    # copy_net = copy.deepcopy(ode_trained)
+    # for i in range(500):
+    #     optimizer_BFGS.step(closure)
+    #     if torch.isnan(closure()):
+    #         print("The loss is nan, I am copying things")
+    #         ode_trained = copy.deepcopy(copy_net)
+    #         optimizer_BFGS = torch.optim.LBFGS(
+    #             ode_trained.parameters(), lr=0.1, history_size=10, max_iter=2
+    #         )
+    #     else:
+    #         copy_net = copy.deepcopy(ode_trained)
 
-        if i % 10 == 0:
-            obs_, ts_, ho_ = create_batch_latent(ETr, h_omegaT, N_Max)
-            input_d = torch.cat([obs_, ho_], axis=2).to(device)
-            x_p, z, z_mean, z_log_var = ode_trained(input_d, ts_.to(device))
-            kl_loss = -0.5 * torch.sum(
-                1 + z_log_var - z_mean ** 2 - torch.exp(z_log_var), -1
-            )
-            error_loss = 0.5 * ((input_d - x_p) ** 2).sum(-1).sum(0) / noise_std ** 2
-            loss = torch.mean(error_loss + kl_loss)
-            print(
-                "(Print) Epoch:",
-                i,
-                "Total_Loss: " + str(loss.item()) + " with error",
-                str(torch.mean(error_loss).item())
-                + " KL divergence "
-                + str(torch.mean(kl_loss).item()),
-                flush=True,
-            )
+    #     if i % 10 == 0:
+    #         obs_, ts_, ho_ = create_batch_latent(ETr, h_omegaT, N_Max)
+    #         input_d = torch.cat([obs_, ho_], axis=2).to(device)
+    #         x_p, z, z_mean, z_log_var = ode_trained(input_d, ts_.to(device))
+    #         kl_loss = -0.5 * torch.sum(
+    #             1 + z_log_var - z_mean ** 2 - torch.exp(z_log_var), -1
+    #         )
+    #         error_loss = 0.5 * ((input_d - x_p) ** 2).sum(-1).sum(0) / noise_std ** 2
+    #         loss = torch.mean(error_loss + kl_loss)
+    #         print(
+    #             "(Print) Epoch:",
+    #             i,
+    #             "Total_Loss: " + str(loss.item()) + " with error",
+    #             str(torch.mean(error_loss).item())
+    #             + " KL divergence "
+    #             + str(torch.mean(kl_loss).item()),
+    #             flush=True,
+    #         )
 
-        if i % 10 == 0 or i == 100:
-            obs_, ts_, ho_ = create_batch_latent(ETr, h_omegaT, N_Max)
-            input_d = torch.cat([obs_, ho_], axis=2).to(device)
-            x_p, z, z_mean, z_log_var = ode_trained(input_d, ts_.to(device))
-            kl_loss = -0.5 * torch.sum(
-                1 + z_log_var - z_mean ** 2 - torch.exp(z_log_var), -1
-            )
-            error_loss = 0.5 * ((input_d - x_p) ** 2).sum(-1).sum(0) / noise_std ** 2
-            loss = torch.mean(error_loss + kl_loss)
+    #     if i % 10 == 0 or i == 100:
+    #         obs_, ts_, ho_ = create_batch_latent(ETr, h_omegaT, N_Max)
+    #         input_d = torch.cat([obs_, ho_], axis=2).to(device)
+    #         x_p, z, z_mean, z_log_var = ode_trained(input_d, ts_.to(device))
+    #         kl_loss = -0.5 * torch.sum(
+    #             1 + z_log_var - z_mean ** 2 - torch.exp(z_log_var), -1
+    #         )
+    #         error_loss = 0.5 * ((input_d - x_p) ** 2).sum(-1).sum(0) / noise_std ** 2
+    #         loss = torch.mean(error_loss + kl_loss)
 
-            print(
-                "(Save) Epoch:",
-                i,
-                "Total_Loss: " + str(loss.item()) + " with error",
-                str(torch.mean(error_loss).item())
-                + " KL divergence "
-                + str(torch.mean(kl_loss).item()),
-                flush=True,
-            )
-            torch.save(
-                {
-                    "step": epochs + i,
-                    "model_state_dict": ode_trained.state_dict(),
-                    "optimizer_state_dict": optimizer_adam.state_dict(),
-                    "loss": loss,
-                },
-                save_path,
-            )
-            obs_, ts_, ho_ = create_batch_latent_order(E, h_omega, N_Max)
-            input_d = torch.cat([obs_, ho_], axis=2).to(device)
-            samp_trajs_p = to_np(
-                ode_trained.generate_with_seed(input_d, ts_.to(device))
-            )
-            # print(samp_trajs_p.shape)
+    #         print(
+    #             "(Save) Epoch:",
+    #             i,
+    #             "Total_Loss: " + str(loss.item()) + " with error",
+    #             str(torch.mean(error_loss).item())
+    #             + " KL divergence "
+    #             + str(torch.mean(kl_loss).item()),
+    #             flush=True,
+    #         )
+    #         torch.save(
+    #             {
+    #                 "step": epochs + i,
+    #                 "model_state_dict": ode_trained.state_dict(),
+    #                 "optimizer_state_dict": optimizer_adam.state_dict(),
+    #                 "loss": loss,
+    #             },
+    #             save_path,
+    #         )
+    #         obs_, ts_, ho_ = create_batch_latent_order(E, h_omega, N_Max)
+    #         input_d = torch.cat([obs_, ho_], axis=2).to(device)
+    #         samp_trajs_p = to_np(
+    #             ode_trained.generate_with_seed(input_d, ts_.to(device))
+    #         )
+    #         # print(samp_trajs_p.shape)
 
-            plt.figure()
-            fig, axes = plt.subplots(
-                nrows=3,
-                ncols=6,
-                facecolor="white",
-                figsize=(9, 9),
-                gridspec_kw={"wspace": 0.5, "hspace": 0.5},
-                dpi=400,
-            )
-            axes = axes.flatten()
-            for j, ax in enumerate(axes):
-                ax.plot(
-                    18 * to_np(ts_[:, j, 0]),
-                    to_np(input_d[:, j, 0]),
-                    label="real",
-                    linewidth=1,
-                )
-                ax.scatter(
-                    18 * ts_[:, j, 0],
-                    samp_trajs_p[:, j, 0],
-                    3,
-                    label="predicted",
-                    marker="*",
-                    c=samp_trajs_p[:, j, 0],
-                    cmap=cm.plasma,
-                )
-                ax.grid("True")
-                ax.set_xlabel(
-                    "NMax, \n h$\\Omega$ ="
-                    + str(np.round(ho_[0, j, 0].item() * 50, 2)),
-                    fontsize=10,
-                )
-                if j == 5:
-                    ax.legend(bbox_to_anchor=(1.05, 1.0), loc="upper left")
-                if j == 0 or j == 6 or j == 12:
-                    ax.set_ylabel("Ground state Energy", fontsize=10)
-            plt.text(
-                20,
-                75,
-                "\n Total loss: "
-                + str(np.round(loss.item(), 2))
-                + "\n with error: "
-                + str(np.round(torch.mean(error_loss).item(), 2))
-                + " \n KL divergence: "
-                + str(np.round(torch.mean(kl_loss).item(), 2)),
-            )
-            plt.savefig(
-                "Figures/training/reconstruction_" + str(i) + ".png",
-                dpi=300,
-                bbox_inches="tight",
-            )
-            plt.close()
+    #         plt.figure()
+    #         fig, axes = plt.subplots(
+    #             nrows=3,
+    #             ncols=6,
+    #             facecolor="white",
+    #             figsize=(9, 9),
+    #             gridspec_kw={"wspace": 0.5, "hspace": 0.5},
+    #             dpi=400,
+    #         )
+    #         axes = axes.flatten()
+    #         for j, ax in enumerate(axes):
+    #             ax.plot(
+    #                 18 * to_np(ts_[:, j, 0]),
+    #                 to_np(input_d[:, j, 0]),
+    #                 label="real",
+    #                 linewidth=1,
+    #             )
+    #             ax.scatter(
+    #                 18 * ts_[:, j, 0],
+    #                 samp_trajs_p[:, j, 0],
+    #                 3,
+    #                 label="predicted",
+    #                 marker="*",
+    #                 c=samp_trajs_p[:, j, 0],
+    #                 cmap=cm.plasma,
+    #             )
+    #             ax.grid("True")
+    #             ax.set_xlabel(
+    #                 "NMax, \n h$\\Omega$ ="
+    #                 + str(np.round(ho_[0, j, 0].item() * 50, 2)),
+    #                 fontsize=10,
+    #             )
+    #             if j == 5:
+    #                 ax.legend(bbox_to_anchor=(1.05, 1.0), loc="upper left")
+    #             if j == 0 or j == 6 or j == 12:
+    #                 ax.set_ylabel("Ground state Energy", fontsize=10)
+    #         plt.text(
+    #             20,
+    #             75,
+    #             "\n Total loss: "
+    #             + str(np.round(loss.item(), 2))
+    #             + "\n with error: "
+    #             + str(np.round(torch.mean(error_loss).item(), 2))
+    #             + " \n KL divergence: "
+    #             + str(np.round(torch.mean(kl_loss).item(), 2)),
+    #         )
+    #         plt.savefig(
+    #             "Figures/training/reconstruction_" + str(i) + ".png",
+    #             dpi=300,
+    #             bbox_inches="tight",
+    #         )
+    #         plt.close()
 
 
 ########################################################################
@@ -460,11 +459,8 @@ def load_checkpoint(path, device="cpu"):
     return step, model, optimizer, loss
 
 
-import time
-
-
 def train_model(stuff):
-    i, model, device, model_path = stuff
+    i, model, device, model_path, epochs = stuff
 
     # Register a handler for SIGTERM which removes the lock on the model.
     def sigterm_handler(*args):
@@ -486,7 +482,7 @@ def train_model(stuff):
     lock_model(model_path)
 
     conduct_experiment_latent(
-        X, model, model_path, device=device, epochs=15000, save_iter=100, print_iter=100
+        X, model, model_path, device=device, epochs=epochs, save_iter=100, print_iter=100
     )
 
     unlock_model(model_path)
@@ -521,17 +517,8 @@ if __name__ == "__main__":
         prog="test_models.py",
         description="Tests the ODEVAE model for the No-Core Shell Model (NCSM)",
     )
-    parser.add_argument("models_path", help="directory where models are stored")
-    parser.add_argument(
-        "-t", "--train", default=False, action="store_true", help="do training"
-    )
-    parser.add_argument(
-        "-p",
-        "--plot",
-        default=True,
-        action="store_true",
-        help="generate plots with test data",
-    )
+    subparsers = parser.add_subparsers(help='', dest='command')
+
     parser.add_argument(
         "-cuda",
         "--cuda",
@@ -546,6 +533,18 @@ if __name__ == "__main__":
         help="number of processes to use (default is to auto detect)",
     )
 
+    train_parser = subparsers.add_parser("train")
+    plot_parser = subparsers.add_parser("plot")
+    list_parser = subparsers.add_parser("list")
+
+    plot_parser.add_argument("models_path", help="directory where models are stored")
+    list_parser.add_argument("models_path", help="directory where models are stored")
+    list_parser.add_argument("-e", "--epochs", default=15000, type=int, help="number of epochs that define a complete training")
+    list_parser.add_argument("-i", "--incomplete", default=False, action="store_true", help="show models where training is incomplete only")
+
+    train_parser.add_argument("models_path", help="directory where models are stored")
+    train_parser.add_argument("-e", "--epochs", default=15000, type=int, help="number of epochs to train for")
+
     args = parser.parse_args()
 
     use_cuda = args.cuda
@@ -559,9 +558,9 @@ if __name__ == "__main__":
         num_devices = len(devices)
         num_processes = num_devices
     else:
-        num_processes = int(args.num_processes)
-        if num_processes is None:
-            num_processes = 4
+        num_processes = 4
+        if args.num_processes is not None:
+            num_processes = int(args.num_processes)
         devices = [torch.device("cpu")] * num_processes
         num_devices = len(devices)
 
@@ -576,17 +575,22 @@ if __name__ == "__main__":
 
     mp.set_start_method("spawn")
 
-    if args.train:
+    if args.command == 'list':
+        for i in range(n_models__):
+            model_path = f"{args.models_path}/Trained_ode_{str(i)}"
+            step, _, _, loss = load_checkpoint(model_path, device=devices[i % num_devices])
+            if step < args.epochs or (not args.incomplete):
+                print(f"Trained_ode_{str(i)}: step={step}, loss={loss}")
+    elif args.command == 'train':
         for i in range(n_models__):
             model_path = f"{args.models_path}/Trained_ode_{str(i)}"
             model_paths.append(model_path)
             checkpoint = load_checkpoint(model_path, device=devices[i % num_devices])
             odes.append(checkpoint)
-        stuff = zip(range(len(odes)), odes, itertools.cycle(devices), model_paths)
+        stuff = zip(range(len(odes)), odes, itertools.cycle(devices), model_paths, itertools.repeat(args.epochs))
         with mp.Pool(num_processes) as pool:
             pool.map(train_model, stuff)
-
-    if args.plot:
+    elif args.command == 'plot':
         X = np.load("data/processed_extrapolation.npy", allow_pickle=True)
         plot_homega_average_(n_models__, X, args.models_path)
         plot_model_averaged_(n_models__, X, args.models_path)
