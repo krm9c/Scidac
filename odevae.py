@@ -5,7 +5,8 @@ import numpy as np
 from odesolver import ForwardEuler, RRK
 
 # ode_solver = ForwardEuler(h_max=0.01)
-ode_solver = RRK(h_max=0.1)
+ode_solver = RRK(h_max=0.1, relaxation=False)
+ode_solver_relax = RRK(h_max=0.1, relaxation=True)
 
 ## Let us now figure out how to get a model.
 class ODEF(nn.Module):
@@ -40,7 +41,7 @@ class ODEF(nn.Module):
 
 class ODEAdjoint(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, z0, t, flat_parameters, func):
+    def forward(ctx, z0, t, flat_parameters, func, relax):
         assert isinstance(func, ODEF)
         bs, *z_shape = z0.size()
         time_len = t.size(0)
@@ -49,10 +50,14 @@ class ODEAdjoint(torch.autograd.Function):
             z = torch.zeros(time_len, bs, *z_shape).to(z0)
             z[0] = z0
             for i_t in range(time_len - 1):
-                z0 = ode_solver.solve(z0, t[i_t, 0, :], t[i_t + 1, 0, :], func)
+                if relax:
+                    z0 = ode_solver_relax.solve(z0, t[i_t, 0, :], t[i_t + 1, 0, :], func)
+                else:
+                    z0 = ode_solver.solve(z0, t[i_t, 0, :], t[i_t + 1, 0, :], func)
                 z[i_t + 1] = z0
 
         ctx.func = func
+        ctx.relax = relax
         ctx.save_for_backward(t, z.clone(), flat_parameters)
         return z
 
@@ -62,6 +67,7 @@ class ODEAdjoint(torch.autograd.Function):
         dLdz shape: time_len, batch_size, *z_shape
         """
         func = ctx.func
+        relax = ctx.relax
         t, z, flat_parameters = ctx.saved_tensors
         time_len, bs, *z_shape = z.size()
         n_dim = np.prod(z_shape)
@@ -143,9 +149,14 @@ class ODEAdjoint(torch.autograd.Function):
                 )
 
                 # Solve augmented system backwards
-                aug_ans = ode_solver.solve(
-                    aug_z, t_i[0, :], t[i_t - 1, 0, :], augmented_dynamics
-                )
+                if relax:
+                    aug_ans = ode_solver_relax.solve(
+                        aug_z, t_i[0, :], t[i_t - 1, 0, :], augmented_dynamics
+                    )
+                else:
+                    aug_ans = ode_solver.solve(
+                        aug_z, t_i[0, :], t[i_t - 1, 0, :], augmented_dynamics
+                    )
 
                 # Unpack solved backwards augmented system
                 adj_z[:] = aug_ans[:, n_dim : 2 * n_dim]
@@ -164,7 +175,7 @@ class ODEAdjoint(torch.autograd.Function):
             # Adjust adjoints
             adj_z += dLdz_0
             adj_t[0] = adj_t[0] - dLdt_0
-        return adj_z.view(bs, *z_shape), adj_t, adj_p, None
+        return adj_z.view(bs, *z_shape), adj_t, adj_p, None, None
 
 
 class NeuralODE(nn.Module):
@@ -172,11 +183,17 @@ class NeuralODE(nn.Module):
         super(NeuralODE, self).__init__()
         assert isinstance(func, ODEF)
         self.func = func
+        self.relax = True
+
+    def turnOffRelax(self):
+        self.relax = False
+
+    def turnOnRelax(self):
+        self.relax = True
 
     def forward(self, z0, t=Tensor([0.0, 1.0]), return_whole_sequence=False):
         t = t.to(z0)
-        # print("the data", t, t.size(), z0.size())
-        z = ODEAdjoint.apply(z0, t, self.func.flatten_parameters(), self.func)
+        z = ODEAdjoint.apply(z0, t, self.func.flatten_parameters(), self.func, self.relax)
         if return_whole_sequence:
             return z
         else:
@@ -197,10 +214,8 @@ class NNODEF(ODEF):
         self.elu = nn.ELU(inplace=True)
 
     def forward(self, x, t):
-        # print(x.shape, t.shape)
         if not self.time_invariant:
             x = torch.cat((x, t.reshape([1, -1])), dim=-1)
-        # print(x.shape)
         h = self.elu(self.lin1(x))
         h = self.elu(self.lin2(h))
         out = self.lin3(h)
@@ -261,6 +276,12 @@ class ODEVAE(nn.Module):
 
         self.encoder = RNNEncoder(output_dim, hidden_dim, latent_dim)
         self.decoder = NeuralODEDecoder(output_dim, hidden_dim, latent_dim)
+
+    def turnOffRelax(self):
+        self.decoder.ode.turnOffRelax()
+
+    def turnOnRelax(self):
+        self.decoder.ode.turnOnRelax()
 
     def forward(self, x, t, MAP=False):
         z_mean, z_log_var = self.encoder(x, t)

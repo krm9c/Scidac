@@ -1,6 +1,9 @@
 Figures/training
-models/
-models_old/
+Figures_old/
+models*/
+
+# JSRUN output
+*.out
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

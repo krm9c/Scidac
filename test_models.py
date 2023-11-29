@@ -3,6 +3,9 @@ import torch
 import torch.multiprocessing as mp
 from torch.autograd import Variable
 import os
+import signal
+import sys
+import pathlib
 import numpy as np
 from tqdm import tqdm_notebook as tqdm
 import matplotlib.pyplot as plt
@@ -47,8 +50,9 @@ def conduct_experiment_latent(
     save_path,
     device="cpu",
     epochs=5000,
-    save_iter=1000,
+    save_iter=100,
     print_iter=100,
+    plot_progress=False,
 ):
     z0 = Variable(torch.Tensor([[0.6, 0.3]]))
     E = X[()]["data"][:, 1:]
@@ -63,6 +67,9 @@ def conduct_experiment_latent(
     prev_epoch, ode_trained, optimizer_adam, prev_loss = step_model_optimizer_loss
     print("Starting training from epoch ", prev_epoch, flush=True)
     for i in range(prev_epoch, epochs):
+        if i > 10000:
+            print(">>>> turn off relaxation")
+            ode_trained.turnOffRelax()
         obs_, ts_, ho_ = create_batch_latent(ETr, h_omegaT, N_Max)
         input_d = torch.cat([obs_, ho_], axis=2).to(device)
         x_p, z, z_mean, z_log_var = ode_trained(input_d, ts_.to(device))
@@ -111,58 +118,61 @@ def conduct_experiment_latent(
             )
             # print(samp_trajs_p.shape)
 
-            plt.figure()
-            fig, axes = plt.subplots(
-                nrows=3,
-                ncols=6,
-                facecolor="white",
-                figsize=(9, 9),
-                gridspec_kw={"wspace": 0.5, "hspace": 0.5},
-                dpi=400,
-            )
-            axes = axes.flatten()
-            for j, ax in enumerate(axes):
-                ax.plot(
-                    18 * to_np(ts_[:, j, 0]),
-                    to_np(input_d[:, j, 0]),
-                    label="real",
-                    linewidth=1,
+            if plot_progress:
+                plt.figure()
+                fig, axes = plt.subplots(
+                    nrows=3,
+                    ncols=6,
+                    facecolor="white",
+                    figsize=(9, 9),
+                    gridspec_kw={"wspace": 0.5, "hspace": 0.5},
+                    dpi=100,
                 )
-                ax.scatter(
-                    18 * ts_[:, j, 0],
-                    samp_trajs_p[:, j, 0],
-                    3,
-                    label="predicted",
-                    marker="*",
-                    c=samp_trajs_p[:, j, 0],
-                    cmap=cm.plasma,
+                axes = axes.flatten()
+                for j, ax in enumerate(axes):
+                    ax.plot(
+                        18 * to_np(ts_[:, j, 0]),
+                        to_np(input_d[:, j, 0]),
+                        label="real",
+                        linewidth=1,
+                    )
+                    ax.scatter(
+                        18 * ts_[:, j, 0],
+                        samp_trajs_p[:, j, 0],
+                        3,
+                        label="predicted",
+                        marker="*",
+                        c=samp_trajs_p[:, j, 0],
+                        cmap=cm.plasma,
+                    )
+                    ax.grid("True")
+                    ax.set_xlabel(
+                        "NMax, \n h$\\Omega$ ="
+                        + str(np.round(ho_[0, j, 0].item() * 50, 2)),
+                        fontsize=10,
+                    )
+                    if j == 5:
+                        ax.legend(bbox_to_anchor=(1.05, 1.0), loc="upper left")
+                    if j == 0 or j == 6 or j == 12:
+                        ax.set_ylabel("Ground state Energy", fontsize=10)
+                plt.text(
+                    20,
+                    75,
+                    "\n Total loss: "
+                    + str(np.round(loss.item(), 2))
+                    + "\n with error: "
+                    + str(np.round(torch.mean(error_loss).item(), 2))
+                    + " \n KL divergence: "
+                    + str(np.round(torch.mean(kl_loss).item(), 2)),
                 )
-                ax.grid("True")
-                ax.set_xlabel(
-                    "NMax, \n h$\\Omega$ ="
-                    + str(np.round(ho_[0, j, 0].item() * 50, 2)),
-                    fontsize=10,
+                fig_path = f"{save_path}/figures/"
+                pathlib.Path(fig_path).mkdir(parents=True, exist_ok=True)
+                plt.savefig(
+                    fig_path + f"reconstruction_{str(i)}.png",
+                    dpi=100,
+                    bbox_inches="tight",
                 )
-                if j == 5:
-                    ax.legend(bbox_to_anchor=(1.05, 1.0), loc="upper left")
-                if j == 0 or j == 6 or j == 12:
-                    ax.set_ylabel("Ground state Energy", fontsize=10)
-            plt.text(
-                20,
-                75,
-                "\n Total loss: "
-                + str(np.round(loss.item(), 2))
-                + "\n with error: "
-                + str(np.round(torch.mean(error_loss).item(), 2))
-                + " \n KL divergence: "
-                + str(np.round(torch.mean(kl_loss).item(), 2)),
-            )
-            plt.savefig(
-                "Figures/training/reconstruction_" + str(i) + ".png",
-                dpi=300,
-                bbox_inches="tight",
-            )
-            plt.close()
+                plt.close()
 
     optimizer_BFGS = torch.optim.LBFGS(
         ode_trained.parameters(), history_size=20, max_iter=2
@@ -301,7 +311,7 @@ def conduct_experiment_latent(
 ########################################################################
 
 ## Plot the first one
-def plot_homega_average_(n_models, X):
+def plot_homega_average_(n_models, X, models_path):
     traj_mean = []
     traj_var = []
     E = X[()]["data"][:, 1:]
@@ -311,7 +321,7 @@ def plot_homega_average_(n_models, X):
     input_d = torch.cat([obs_, ho_], axis=2)
 
     for i in range(n_models):
-        path = "models/Trained_ode_" + str(i)
+        path = f"{models_path}/Trained_ode_{str(i)}"
         _, ode_trained, _, _ = load_checkpoint(path)
         samp_trajs_p = to_np(ode_trained.generate_with_seed(input_d, ts_))
         traj_mean.append(np.mean(samp_trajs_p, axis=1))
@@ -362,16 +372,18 @@ def plot_homega_average_(n_models, X):
     plt.close()
 
 
-def plot_model_averaged_(n_models, X):
+def plot_model_averaged_(n_models, X, models_path):
     traj = []
     E = X[()]["data"][:, 1:]
     h_omega = X[()]["data"][:, 0] / 50
-    N_Max = X[()]["Nmax"].reshape([-1]) / 18
+    # N_Max = X[()]["Nmax"].reshape([-1]) / 18
+    N_Max = np.arange(1000) * 0.2
+    ax_scale = 5
     obs_, ts_, ho_ = create_batch_latent_order(E, h_omega, N_Max)
     input_d = torch.cat([obs_, ho_], axis=2)
 
     for i in range(n_models):
-        path = "models/Trained_ode_" + str(i)
+        path = f"{models_path}/Trained_ode_{str(i)}"
         _, ode_trained, _, _ = load_checkpoint(path)
         samp_trajs_p = to_np(ode_trained.generate_with_seed(input_d, ts_))
         traj.append(samp_trajs_p[:, :, 0])
@@ -395,7 +407,7 @@ def plot_model_averaged_(n_models, X):
     axes = axes.flatten()
     for j, ax in enumerate(axes):
         ax.scatter(
-            (18 * ts_[:, 0, 0]).reshape([-1, 1]),
+            (ax_scale * ts_[:, 0, 0]).reshape([-1, 1]),
             mu[:, j],
             label="predicted",
             marker="*",
@@ -403,7 +415,7 @@ def plot_model_averaged_(n_models, X):
             cmap=cm.plasma,
         )
         ax.fill_between(
-            18 * ts_[:, 0, 0].reshape([-1]),
+            (ax_scale * ts_[:, 0, 0]).reshape([-1]),
             (mu[:, j] - var[:, j]).reshape([-1]),
             (mu[:, j] + var[:, j]).reshape([-1]),
             color="gray",
@@ -448,17 +460,57 @@ def load_checkpoint(path, device="cpu"):
     return step, model, optimizer, loss
 
 
+import time
+
+
 def train_model(stuff):
-    i, model, device = stuff
-    path = "models/Trained_ode_" + str(i)
+    i, model, device, model_path = stuff
+
+    # Register a handler for SIGTERM which removes the lock on the model.
+    def sigterm_handler(*args):
+        unlock_model(model_path)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, sigterm_handler)
+
+    if is_locked(model_path):
+        return
+
     X = np.load("data/processed_extrapolation.npy", allow_pickle=True)
     print(
         f"Launch training of model {i} on process {mp.current_process().pid}",
         flush=True,
     )
+
+    # Create a lock for this model so only this process/job can work on this model
+    lock_model(model_path)
+
     conduct_experiment_latent(
-        X, model, path, device=device, epochs=30000, save_iter=10000, print_iter=5000
+        X, model, model_path, device=device, epochs=15000, save_iter=100, print_iter=100
     )
+
+    unlock_model(model_path)
+
+
+########################################################################
+
+# We want to be able to launch multiple jobs to train subsets of the
+# ensemble of models concurrently. As such, we use a filesystem based
+# semaphore to ensure a model is not being worked on by more than one job.
+
+
+def lock_model(model_path):
+    lock_file = open(model_path + ".lock", "w")
+    lock_file.write(f"{mp.current_process().pid}")
+    lock_file.close()
+
+
+def unlock_model(model_path):
+    os.remove(model_path + ".lock")
+
+
+def is_locked(model_path):
+    return os.path.isfile(model_path + ".lock")
 
 
 ########################################################################
@@ -469,6 +521,7 @@ if __name__ == "__main__":
         prog="test_models.py",
         description="Tests the ODEVAE model for the No-Core Shell Model (NCSM)",
     )
+    parser.add_argument("models_path", help="directory where models are stored")
     parser.add_argument(
         "-t", "--train", default=False, action="store_true", help="do training"
     )
@@ -479,13 +532,26 @@ if __name__ == "__main__":
         action="store_true",
         help="generate plots with test data",
     )
+    parser.add_argument(
+        "-cuda",
+        "--cuda",
+        default=False,
+        action="store_true",
+        help="consider using CUDA if it is available",
+    )
+    parser.add_argument(
+        "-np",
+        "--num-processes",
+        default=None,
+        help="number of processes to use (default is to auto detect)",
+    )
 
     args = parser.parse_args()
 
-    mp.set_start_method("spawn")
-    use_cuda = torch.cuda.is_available()
+    use_cuda = args.cuda
+    if use_cuda:
+        use_cuda = torch.cuda.is_available()
 
-    # use_cuda = True
     if use_cuda:
         devices = [
             torch.device("cuda:%d" % i) for i in range(torch.cuda.device_count())
@@ -493,7 +559,9 @@ if __name__ == "__main__":
         num_devices = len(devices)
         num_processes = num_devices
     else:
-        num_processes = 8
+        num_processes = int(args.num_processes)
+        if num_processes is None:
+            num_processes = 4
         devices = [torch.device("cpu")] * num_processes
         num_devices = len(devices)
 
@@ -503,18 +571,22 @@ if __name__ == "__main__":
     )
 
     odes = []
+    model_paths = []
     n_models__ = 100
+
+    mp.set_start_method("spawn")
 
     if args.train:
         for i in range(n_models__):
-            path = "models/Trained_ode_" + str(i)
-            checkpoint = load_checkpoint(path, device=devices[i % num_devices])
+            model_path = f"{args.models_path}/Trained_ode_{str(i)}"
+            model_paths.append(model_path)
+            checkpoint = load_checkpoint(model_path, device=devices[i % num_devices])
             odes.append(checkpoint)
-        stuff = zip(range(len(odes)), odes, itertools.cycle(devices))
+        stuff = zip(range(len(odes)), odes, itertools.cycle(devices), model_paths)
         with mp.Pool(num_processes) as pool:
             pool.map(train_model, stuff)
 
     if args.plot:
         X = np.load("data/processed_extrapolation.npy", allow_pickle=True)
-        plot_homega_average_(n_models__, X)
-        plot_model_averaged_(n_models__, X)
+        plot_homega_average_(n_models__, X, args.models_path)
+        plot_model_averaged_(n_models__, X, args.models_path)
