@@ -40,6 +40,11 @@ class ODEF(nn.Module):
 
 
 class ODEAdjoint(torch.autograd.Function):
+    # Not sure if there is a better way to signal back
+    # to the NeuralODE class (a NN module) that  the
+    # relaxation failed, so call turnOffRelax().
+    relax_failed = False
+
     @staticmethod
     def forward(ctx, z0, t, flat_parameters, func, relax):
         assert isinstance(func, ODEF)
@@ -51,7 +56,13 @@ class ODEAdjoint(torch.autograd.Function):
             z[0] = z0
             for i_t in range(time_len - 1):
                 if relax:
-                    z0 = ode_solver_relax.solve(z0, t[i_t, 0, :], t[i_t + 1, 0, :], func)
+                    try:
+                        # If relaxation method fails (usually with a "time step too large" error)
+                        # then we fall back to regular RK.
+                        z0 = ode_solver_relax.solve(z0, t[i_t, 0, :], t[i_t + 1, 0, :], func)
+                    except:
+                        ODEAdjoint.relax_failed = True
+                        z0 = ode_solver.solve(z0, t[i_t, 0, :], t[i_t + 1, 0, :], func)
                 else:
                     z0 = ode_solver.solve(z0, t[i_t, 0, :], t[i_t + 1, 0, :], func)
                 z[i_t + 1] = z0
@@ -194,6 +205,8 @@ class NeuralODE(nn.Module):
     def forward(self, z0, t=Tensor([0.0, 1.0]), return_whole_sequence=False):
         t = t.to(z0)
         z = ODEAdjoint.apply(z0, t, self.func.flatten_parameters(), self.func, self.relax)
+        if ODEAdjoint.relax_failed:
+            self.turnOffRelax()
         if return_whole_sequence:
             return z
         else:
