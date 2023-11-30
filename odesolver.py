@@ -13,7 +13,7 @@ class ODESolver(ABC):
 
 
 class ForwardEuler(ODESolver):
-    def __init__(self, h_max, store_sol):
+    def __init__(self, h_max, store_sol=False):
         self.h_max = h_max
         self.store_sol = store_sol
 
@@ -21,16 +21,19 @@ class ForwardEuler(ODESolver):
         device = z0.device
         h_max = self.h_max
         n_steps = math.ceil((abs(tf - t0) / h_max).max().item())
-        h = (tf - t0) / n_steps
-        t = t0
+        dt = (tf - t0) / n_steps
+        t = t0.detach().clone()
         z = z0.detach().clone()
         if self.store_sol:
             tt = [t.detach().clone()]
-            zz = torch.zeros([len(z0), n_steps + 1]).to(device)
+            # zz = torch.zeros([len(z0), n_steps + 1]).to(device)
+            zz = torch.zeros(
+                [*z0.shape, int(abs(tf - t) / abs(dt) * 2.5) + 10000]
+            ).to(device)
             zz[:, 0] = z.detach().clone()
         for ii in range(n_steps):
-            z = z + h * f(z, t)
-            t = t + h
+            z = z + dt * f(z, t)
+            t = t + dt
             if self.store_sol:
                 zz[:, ii] = z.detach().clone()
                 tt.append(t.detach().clone())
@@ -44,12 +47,12 @@ class RRK(ODESolver):
     def __init__(
         self,
         h_max,
-        rkm=rk.loadRKM("RK44").__num__(),
+        rkm="RK44",
         relaxation=True,
         rescale_step=True,
         store_sol=False,
     ):
-        self.rkm = rkm
+        self.rkm = rk.loadRKM(rkm).__num__()
         self.h_max = h_max
         self.relaxation = relaxation
         self.rescale_step = rescale_step
@@ -62,9 +65,9 @@ class RRK(ODESolver):
             self.rkm,
             dt,
             f,
-            w0=z0,
-            t_init=t0,
-            t_final=tf,
+            z0=z0,
+            t0=t0,
+            tf=tf,
             relaxation=self.relaxation,
             rescale_step=self.rescale_step,
             store_sol=self.store_sol,
@@ -74,9 +77,9 @@ class RRK(ODESolver):
         rkm,
         dt,
         f,
-        w0=[1.0, 0],
-        t_init=0.0,
-        t_final=1.0,
+        z0=[1.0, 0],
+        t0=0.0,
+        tf=1.0,
         relaxation=True,
         rescale_step=True,
         store_sol=False,
@@ -99,41 +102,41 @@ class RRK(ODESolver):
             rkm: Base Runge-Kutta method, in Nodepy format
             dt: time step size
             f: RHS of ODE system
-            w0: Initial data
-            t_init: starting solution time
-            t_final: final solution time
+            z0: Initial data
+            t0: starting solution time
+            tf: final solution time
             relaxation: if True, use relaxation method.  Otherwise, use vanilla RK method.
             rescale_step: if True, new time step is t_n + \gamma dt
             debug: output some additional diagnostics
             gammatol: Fail if abs(1-gamma) exceeds this value
             
         """
-        device = w0.device
-        t = t_init
-        w = w0.detach().clone()
+        device = z0.device
+        t = t0.detach().clone()
+        z = z0.detach().clone()
         if store_sol:
             # We pre-allocate extra space because if rescale_step==True then
             # we don't know exactly how many steps we will take.
-            ww = torch.zeros(
-                [*w0.shape, int(abs(t_final - t) / abs(dt) * 2.5) + 10000]
+            zz = torch.zeros(
+                [*z0.shape, int(abs(tf - t) / abs(dt) * 2.5) + 10000]
             ).to(device)
-            ww[:, 0] = w.detach().clone()
+            zz[:, 0] = z.detach().clone()
             tt = [t.detach().clone()]
         ii = 0
         s = len(rkm)
         A = torch.tensor(rkm.A).to(device)
         b = torch.tensor(rkm.b).to(device)
-        y = torch.zeros((s, *w0.shape)).to(device)
+        y = torch.zeros((s, *z0.shape)).to(device)
         max_gammam1 = 0.0
         gams = []
 
-        while t < t_final if t_final > t_init else t > t_final:
+        while t < tf if tf > t0 else t > tf:
 
-            if (t + dt - t_final) * dt > 0.0:
-                dt = t_final - t  # Hit final time exactly
+            if (t + dt - tf) * dt > 0.0:
+                dt = tf - t  # Hit final time exactly
 
             for i in range(s):
-                y[i, :] = w.detach().clone()
+                y[i, :] = z.detach().clone()
                 for j in range(i):
                     y[i, :] += A[i, j] * dt * f(y[j, :], t)
 
@@ -159,32 +162,33 @@ class RRK(ODESolver):
 
             if print_gamma:
                 print(gam)
-
+            
+            # TODO(CJB): when it is standard RK, shouldn't this be disabled?
             if torch.abs(gam - torch.tensor([1.0]).to(device)) > gammatol:
                 print(gam)
                 raise Exception("The time step is probably too large.")
 
-            w = w + dissip_factor * gam * dt * sum([b[j] * F[j] for j in range(s)])
-            if (t + dt - t_final) * dt and rescale_step:
+            z = z + dissip_factor * gam * dt * sum([b[j] * F[j] for j in range(s)])
+            if (t + dt - tf) * dt and rescale_step:
                 t += dissip_factor * gam * dt
             else:
                 t += dt
             ii += 1
             if store_sol:
                 tt.append(t.detach().clone())
-                ww[:, ii] = w.detach().clone()
+                zz[:, ii] = z.detach().clone()
             if debug:
                 gm1 = torch.abs(1.0 - gam)
                 max_gammam1 = max(max_gammam1, gm1)
                 gams.append(gam)
 
             if one_step:
-                return w, gam
+                return z, gam
 
         if debug:
             print(max_gammam1)
-            return torch.cat(tt), ww[:, : ii + 1], torch.cat(gams)
+            return torch.cat(tt), zz[:, : ii + 1], torch.cat(gams)
         elif store_sol:
-            return torch.cat(tt), ww[:, : ii + 1]
+            return torch.cat(tt), zz[:, : ii + 1]
         else:
-            return w
+            return z

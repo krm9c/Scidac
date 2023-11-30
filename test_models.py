@@ -322,7 +322,7 @@ def plot_homega_average_(n_models, X, models_path):
     for i in range(n_models):
         path = f"{models_path}/Trained_ode_{str(i)}"
         _, ode_trained, _, _ = load_checkpoint(path)
-        samp_trajs_p = to_np(ode_trained.generate_with_seed(input_d, ts_))
+        samp_trajs_p = to_np(ode_trained.infer(input_d, ts_))
         traj_mean.append(np.mean(samp_trajs_p, axis=1))
         traj_var.append(np.std(samp_trajs_p, axis=1) ** 2)
 
@@ -375,16 +375,17 @@ def plot_model_averaged_(n_models, X, models_path):
     traj = []
     E = X[()]["data"][:, 1:]
     h_omega = X[()]["data"][:, 0] / 50
-    # N_Max = X[()]["Nmax"].reshape([-1]) / 18
-    N_Max = np.arange(1000) * 0.2
-    ax_scale = 5
+    N_Max = X[()]["Nmax"].reshape([-1]) / 18
+    ax_scale = 18
+    # N_Max = np.arange(1000) * 0.2
+    # ax_scale = 5
     obs_, ts_, ho_ = create_batch_latent_order(E, h_omega, N_Max)
     input_d = torch.cat([obs_, ho_], axis=2)
 
     for i in range(n_models):
         path = f"{models_path}/Trained_ode_{str(i)}"
         _, ode_trained, _, _ = load_checkpoint(path)
-        samp_trajs_p = to_np(ode_trained.generate_with_seed(input_d, ts_))
+        samp_trajs_p = to_np(ode_trained.infer(input_d, ts_))
         traj.append(samp_trajs_p[:, :, 0])
 
     mu = np.mean(np.array(traj), axis=0)
@@ -406,7 +407,7 @@ def plot_model_averaged_(n_models, X, models_path):
     axes = axes.flatten()
     for j, ax in enumerate(axes):
         ax.scatter(
-            (ax_scale * ts_[:, 0, 0]).reshape([-1, 1]),
+            (ax_scale * N_Max).reshape([-1, 1]),
             mu[:, j],
             label="predicted",
             marker="*",

@@ -1,12 +1,14 @@
 import torch
 from torch import Tensor
 from torch import nn
+import sys
 import numpy as np
 from odesolver import ForwardEuler, RRK
 
 # ode_solver = ForwardEuler(h_max=0.01)
-ode_solver = RRK(h_max=0.1, relaxation=False)
-ode_solver_relax = RRK(h_max=0.1, relaxation=True)
+# ode_solver = RRK(h_max=0.01, rkm="FE", relaxation=False)
+ode_solver = RRK(h_max=0.1, rkm="RK44", relaxation=False)
+ode_solver_relax = RRK(h_max=0.1, rkm="RK44", relaxation=True)
 
 ## Let us now figure out how to get a model.
 class ODEF(nn.Module):
@@ -304,6 +306,10 @@ class ODEVAE(nn.Module):
             z = z_mean + torch.randn_like(z_mean) * torch.exp(0.5 * z_log_var)
         x_p = self.decoder(z, t)
         return x_p, z, z_mean, z_log_var
+
+    def infer(self, seed_x, t):
+        self.turnOffRelax() # no relaxation when inferring
+        return self.generate_with_seed(seed_x, t)
 
     def generate_with_seed(self, seed_x, t):
         seed_t_len = seed_x.shape[0]

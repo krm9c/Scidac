@@ -44,9 +44,9 @@ dt = 0.1
 t0 = torch.tensor([0.0])
 tf = torch.tensor([TEND])
 
-fe = rk.loadRKM("FE").__num__()
-trap = rk.loadRKM("SSP22").__num__()
-rk4 = rk.loadRKM("RK44").__num__()
+fe = "FE"
+trap = "SSP22"
+rk4 = "RK44"
 ode_solver = RRK(h_max=dt, rkm=rk4, relaxation=True, rescale_step=True, store_sol=True)
 
 tt, uu = ode_solver.solve(u0, t0, tf, HarmonicOscillator.f)
