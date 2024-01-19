@@ -7,16 +7,14 @@ import signal
 import sys
 import pathlib
 import numpy as np
-from tqdm import tqdm_notebook as tqdm
 import matplotlib.pyplot as plt
 import seaborn as sns
 import matplotlib.cm as cm
 import itertools
+import time
 
 sns.color_palette("bright")
 from odevae import *
-import copy
-
 
 def to_np(x):
     return x.detach().cpu().numpy()
@@ -66,6 +64,7 @@ def conduct_experiment_latent(
     # Train Neural ODE
     prev_epoch, ode_trained, optimizer_adam, prev_loss = step_model_optimizer_loss
     print("Starting training from epoch ", prev_epoch, flush=True)
+    begin_time = time.time()
     for i in range(prev_epoch, epochs):
         if i > 10000:
             ode_trained.turnOffRelax()
@@ -92,15 +91,9 @@ def conduct_experiment_latent(
                 flush=True,
             )
         if i % save_iter == 0 or i == epochs:
-            print(
-                "(Save) Epoch:",
-                i,
-                "Total_Loss: " + str(loss.item()) + " with error",
-                str(torch.mean(error_loss).item())
-                + " KL divergence "
-                + str(torch.mean(kl_loss).item()),
-                flush=True,
-            )
+            end_time = time.time()
+            print(f"(Save)({(end_time-begin_time):.2f}s) Epoch: {i} Total Loss: {str(loss.item())} with error {str(torch.mean(error_loss).item())} KL divergence {str(torch.mean(kl_loss).item())}", flush=True)
+            begin_time = time.time()
             torch.save(
                 {
                     "step": i,
@@ -507,7 +500,7 @@ def train_model(stuff):
 
     # Create a lock for this model so only this process/job can work on this model
     lock_model(model_path)
-
+    
     conduct_experiment_latent(
         X, model, model_path, device=device, epochs=epochs, save_iter=100, print_iter=1000
     )
@@ -580,7 +573,9 @@ if __name__ == "__main__":
             torch.device("cuda:%d" % i) for i in range(torch.cuda.device_count())
         ]
         num_devices = len(devices)
-        num_processes = num_devices
+        num_processes = 1
+        if args.num_processes is not None:
+            num_processes = int(args.num_processes)
     else:
         num_processes = 4
         if args.num_processes is not None:
@@ -596,6 +591,7 @@ if __name__ == "__main__":
     odes = []
     model_paths = []
     n_models__ = 3
+
     mp.set_start_method("spawn")
     if args.command == 'list':
         for i in range(n_models__):
