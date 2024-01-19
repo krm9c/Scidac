@@ -5,9 +5,9 @@ import sys
 import numpy as np
 from odesolver import ForwardEuler, RRK
 
-# ode_solver = ForwardEuler(h_max=0.01)
+ode_solver = ForwardEuler(h_max=0.01)
 # ode_solver = RRK(h_max=0.01, rkm="FE", relaxation=False)
-ode_solver = RRK(h_max=0.1, rkm="RK44", relaxation=False)
+# ode_solver = RRK(h_max=0.1, rkm="RK44", relaxation=False)
 ode_solver_relax = RRK(h_max=0.1, rkm="RK44", relaxation=True)
 
 ## Let us now figure out how to get a model.

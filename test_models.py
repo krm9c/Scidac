@@ -50,8 +50,8 @@ def conduct_experiment_latent(
     save_path,
     device="cpu",
     epochs=5000,
-    save_iter=100,
-    print_iter=100,
+    save_iter=10000,
+    print_iter=10000,
     plot_progress=False,
 ):
     z0 = Variable(torch.Tensor([[0.6, 0.3]]))
@@ -75,9 +75,9 @@ def conduct_experiment_latent(
         kl_loss = -0.5 * torch.sum(
             1 + z_log_var - z_mean ** 2 - torch.exp(z_log_var), -1
         )
-        error_loss = 0.5 * ((input_d - x_p) ** 2).sum(-1).sum(0) / noise_std ** 2
-
-        loss = torch.mean(error_loss + kl_loss)
+        error_loss = 0.5 *(((input_d - x_p)**2)).sum(-1).sum(0) / noise_std ** 2
+        # error_loss_trans = (torch.log((input_d - x_p)**2)).sum(-1).sum(0)
+        loss = torch.mean(error_loss + 0.001*kl_loss)
         optimizer_adam.zero_grad()
         loss.backward(retain_graph=True)
         optimizer_adam.step()
@@ -318,7 +318,6 @@ def plot_homega_average_(n_models, X, models_path):
     N_Max = X[()]["Nmax"].reshape([-1]) / 18
     obs_, ts_, ho_ = create_batch_latent_order(E, h_omega, N_Max)
     input_d = torch.cat([obs_, ho_], axis=2)
-
     for i in range(n_models):
         path = f"{models_path}/Trained_ode_{str(i)}"
         _, ode_trained, _, _ = load_checkpoint(path)
@@ -349,6 +348,16 @@ def plot_homega_average_(n_models, X, models_path):
         c=samp_trajs_p[:, 0, 0],
         cmap=cm.plasma,
     )
+
+    axes.scatter(
+            (18 * ts_[:, 0, 0]).reshape([-1, 1]),
+            np.mean(input_d[:, :, 0].numpy(), axis=1) ,
+            label="original", marker="o",
+            c=np.mean(input_d[:, :, 0].numpy(), axis=1),
+            cmap=cm.viridis,
+        )
+
+
     axes.fill_between(
         18 * ts_[:, 0, 0].reshape([-1]),
         (mu[:, 0] - var[:, 0]).reshape([-1]),
@@ -360,7 +369,7 @@ def plot_homega_average_(n_models, X, models_path):
     axes.set_xlabel("NMax", fontsize=10)
     axes.legend(bbox_to_anchor=(1.05, 1.0), loc="upper left")
     axes.set_ylabel("Ground state Energy", fontsize=10)
-    axes.set_ylim(-100, 0)
+    axes.set_ylim(-31.5, -30)
     axes.set_xlim(left=4)
     plt.title("Ground State Energy averaged w.r.t. $\\overline{h} \\Omega$")
     plt.savefig(
@@ -379,14 +388,16 @@ def plot_model_averaged_(n_models, X, models_path):
     ax_scale = 18
     # N_Max = np.arange(1000) * 0.2
     # ax_scale = 5
+    
     obs_, ts_, ho_ = create_batch_latent_order(E, h_omega, N_Max)
     input_d = torch.cat([obs_, ho_], axis=2)
-
+    print(obs_.shape, ho_.shape, input_d.shape)
     for i in range(n_models):
         path = f"{models_path}/Trained_ode_{str(i)}"
         _, ode_trained, _, _ = load_checkpoint(path)
         samp_trajs_p = to_np(ode_trained.infer(input_d, ts_))
         traj.append(samp_trajs_p[:, :, 0])
+
 
     mu = np.mean(np.array(traj), axis=0)
     var = np.std(np.array(traj), axis=0)
@@ -404,6 +415,8 @@ def plot_model_averaged_(n_models, X, models_path):
         gridspec_kw={"wspace": 0.5, "hspace": 0.5},
         dpi=400,
     )
+
+    # print("check before plotting", mu[:, 0].shape, input_d[:, 0, 0].shape)
     axes = axes.flatten()
     for j, ax in enumerate(axes):
         ax.scatter(
@@ -414,6 +427,17 @@ def plot_model_averaged_(n_models, X, models_path):
             c=samp_trajs_p[:, j, 0],
             cmap=cm.plasma,
         )
+
+        ax.scatter(
+            (ax_scale * N_Max).reshape([-1, 1]),
+            input_d[:, j, 0].numpy(),
+            label="original",
+            marker="o",
+            c=input_d[:, j, 0].numpy(),
+            cmap=cm.viridis,
+        )
+
+
         ax.fill_between(
             (ax_scale * ts_[:, 0, 0]).reshape([-1]),
             (mu[:, j] - var[:, j]).reshape([-1]),
@@ -421,6 +445,7 @@ def plot_model_averaged_(n_models, X, models_path):
             color="gray",
             alpha=0.2,
         )
+
         ax.axhline(y=-32.2, color="r")
         ax.annotate("-32.2", (6, -33))
         ax.grid("True")
@@ -431,7 +456,7 @@ def plot_model_averaged_(n_models, X, models_path):
         if j % num_cols == 0:
             ax.set_ylabel("Ground state Energy", fontsize=10)
             ax.set_title("Ground State Energy averaged  w.r.t. models")
-        ax.set_ylim(-32.5, -30)
+        ax.set_ylim(-32.3, -30.5)
         ax.set_xlim(left=4)
         ax.get_legend_handles_labels()
     handles, labels = plt.gca().get_legend_handles_labels()
@@ -449,25 +474,26 @@ def load_checkpoint(path, device="cpu"):
     loss = 0
     model = ODEVAE(2, 128, 6)
     model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    optimizer = torch.optim.NAdam(model.parameters(), lr=1e-5)
+    print("Initialized without checkpointing")
     if os.path.exists(path):
+        print("load from checkpoint")
         checkpoint = torch.load(path)
         step = checkpoint["step"]
         loss = checkpoint["loss"]
         model.load_state_dict(checkpoint["model_state_dict"])
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        # optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
     return step, model, optimizer, loss
 
 
 def train_model(stuff):
     i, model, device, model_path, epochs = stuff
-
+    print("Starting to train")
     # Register a handler for SIGTERM which removes the lock on the model.
     def sigterm_handler(*args):
         unlock_model(model_path)
         sys.exit(0)
-
     signal.signal(signal.SIGTERM, sigterm_handler)
 
     if is_locked(model_path):
@@ -483,19 +509,16 @@ def train_model(stuff):
     lock_model(model_path)
 
     conduct_experiment_latent(
-        X, model, model_path, device=device, epochs=epochs, save_iter=100, print_iter=100
+        X, model, model_path, device=device, epochs=epochs, save_iter=100, print_iter=1000
     )
 
     unlock_model(model_path)
 
 
 ########################################################################
-
 # We want to be able to launch multiple jobs to train subsets of the
 # ensemble of models concurrently. As such, we use a filesystem based
 # semaphore to ensure a model is not being worked on by more than one job.
-
-
 def lock_model(model_path):
     lock_file = open(model_path + ".lock", "w")
     lock_file.write(f"{mp.current_process().pid}")
@@ -540,11 +563,11 @@ if __name__ == "__main__":
 
     plot_parser.add_argument("models_path", help="directory where models are stored")
     list_parser.add_argument("models_path", help="directory where models are stored")
-    list_parser.add_argument("-e", "--epochs", default=15000, type=int, help="number of epochs that define a complete training")
+    list_parser.add_argument("-e", "--epochs", default=60000, type=int, help="number of epochs that define a complete training")
     list_parser.add_argument("-i", "--incomplete", default=False, action="store_true", help="show models where training is incomplete only")
 
     train_parser.add_argument("models_path", help="directory where models are stored")
-    train_parser.add_argument("-e", "--epochs", default=15000, type=int, help="number of epochs to train for")
+    train_parser.add_argument("-e", "--epochs", default=60000, type=int, help="number of epochs to train for")
 
     args = parser.parse_args()
 
@@ -572,10 +595,8 @@ if __name__ == "__main__":
 
     odes = []
     model_paths = []
-    n_models__ = 100
-
+    n_models__ = 3
     mp.set_start_method("spawn")
-
     if args.command == 'list':
         for i in range(n_models__):
             model_path = f"{args.models_path}/Trained_ode_{str(i)}"
