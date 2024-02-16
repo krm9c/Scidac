@@ -1,6 +1,7 @@
 *.cobaltlog
 *.error
 *.output
+extrapolation-output/
 Figures/training
 Figures_old/
 models*/

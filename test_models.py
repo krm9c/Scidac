@@ -56,7 +56,7 @@ def create_batch_latent_order(X, y, N_Max, repeat=0):
         stackable = torch.vstack([obs_[(obs_.shape[0]-1),:,:].unsqueeze(0)
                      for i in range((N_Max.shape[0]-obs_.shape[0]))])        
         # print("stackable", stackable.shape)
-        obs_ext= torch.concatenate([obs_, stackable ], axis=0)
+        obs_ext= torch.cat([obs_, stackable ], axis=0)
         ts_ = np.vstack(N_Max).astype(np.float32).reshape([-1, 1])
         ts_ = torch.from_numpy(np.repeat(ts_, obs_.shape[1], axis=1)).unsqueeze(2)
         ho_ = torch.from_numpy(np.repeat(y[idx].astype(np.float32).reshape([1, -1]), obs_ext.shape[0], axis=0)
@@ -701,7 +701,7 @@ if __name__ == "__main__":
 
     odes = []
     model_paths = []
-    n_models__ = 3
+    n_models__ = 100
 
     mp.set_start_method("spawn")
     if args.command == 'list':
