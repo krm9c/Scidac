@@ -1,3 +1,6 @@
+*.cobaltlog
+*.error
+*.output
 Figures/training
 Figures_old/
 models*/
