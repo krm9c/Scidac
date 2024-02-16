@@ -1,6 +1,7 @@
 *.cobaltlog
 *.error
 *.output
+nuclear-extrapolation*
 extrapolation-output/
 Figures/training
 Figures_old/
