@@ -31,12 +31,11 @@ def create_batch_latent(X, y, N_Max, repeat=0):
     return obs_, ts_, ho_
 
 
+
 def create_batch_latent_order(X, y, N_Max, repeat=0):
     if repeat ==0:
         idx = [i for i in range(X.shape[0])]
         obs_ = torch.from_numpy(X[idx, :].astype(np.float32).T).unsqueeze(2)
-
-
         ts_ = np.vstack(N_Max).astype(np.float32).reshape([-1, 1])
         ts_ = torch.from_numpy(np.repeat(ts_, obs_.shape[1], axis=1)).unsqueeze(2)
         ho_ = torch.from_numpy(
@@ -50,17 +49,19 @@ def create_batch_latent_order(X, y, N_Max, repeat=0):
         # print(N_Max.shape, obs_.shape)
         N_Max = np.concatenate([N_Max+j*18 for j in range(repeat+1) ], axis=0)
         N_Max = (N_Max/np.max(N_Max))
-
         # print("that N_Max", N_Max, N_Max.shape[0], obs_[8,:,:].shape)
-        
         stackable = torch.vstack([obs_[(obs_.shape[0]-1),:,:].unsqueeze(0)
                      for i in range((N_Max.shape[0]-obs_.shape[0]))])        
-        # print("stackable", stackable.shape)
+
+        #########################################################################
+        # print("stackable", obs_.shape, stackable.shape)
         obs_ext= torch.cat([obs_, stackable ], axis=0)
         ts_ = np.vstack(N_Max).astype(np.float32).reshape([-1, 1])
         ts_ = torch.from_numpy(np.repeat(ts_, obs_.shape[1], axis=1)).unsqueeze(2)
         ho_ = torch.from_numpy(np.repeat(y[idx].astype(np.float32).reshape([1, -1]), obs_ext.shape[0], axis=0)
         ).unsqueeze(2)
+
+        # print(obs_.shape, obs_ext.shape, ts_.shape, ho_.shape)
         return obs_, obs_ext, ts_, ho_
         
 
@@ -95,11 +96,8 @@ def conduct_experiment_latent(
         obs_, obs_ext, ts_, ho_ = create_batch_latent_order(ETr, h_omegaT, N_Max, repeat=5)
         input_d = torch.cat([obs_ext, ho_], axis=2).to(device)
         x_p, z, z_mean, z_log_var = ode_trained(input_d, ts_.to(device))
-        kl_loss = -0.5 * torch.sum(
-            1 + z_log_var - z_mean ** 2 - torch.exp(z_log_var), -1
-        )
-        error_loss = 0.5 *(((input_d- x_p[obs_.shape[0],:,:])**2)).sum(-1).sum(0) / noise_std ** 2
-        # error_loss_trans = (torch.log((input_d - x_p)**2)).sum(-1).sum(0)
+        kl_loss = -0.5 * torch.sum( 1 + z_log_var - z_mean ** 2 - torch.exp(z_log_var), -1)
+        error_loss = 0.5 *(((input_d[:9,:,:]- x_p[:9,:,:])**2)).sum(-1).sum(0) / noise_std ** 2
         loss = torch.mean(error_loss + 0.0001*kl_loss)
         optimizer_adam.zero_grad()
         loss.backward(retain_graph=True)
@@ -578,7 +576,7 @@ def load_checkpoint(path, device="cpu"):
     loss = 0
     model = ODEVAE(2, 128, 6)
     model.to(device)
-    optimizer = torch.optim.NAdam(model.parameters(), lr=1e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
     print("Initialized without checkpointing")
     if os.path.exists(path):
         print("load from checkpoint")
@@ -613,7 +611,7 @@ def train_model(stuff):
     lock_model(model_path)
     
     conduct_experiment_latent(
-        X, model, model_path, device=device, epochs=epochs, save_iter=100, print_iter=1000
+        X, model, model_path, device=device, epochs=epochs, save_iter=1000, print_iter=10000
     )
 
     unlock_model(model_path)
@@ -650,7 +648,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "-cuda",
         "--cuda",
-        default=False,
+        default=True,
         action="store_true",
         help="consider using CUDA if it is available",
     )
@@ -701,7 +699,7 @@ if __name__ == "__main__":
 
     odes = []
     model_paths = []
-    n_models__ = 100
+    n_models__ = 1
 
     mp.set_start_method("spawn")
     if args.command == 'list':
