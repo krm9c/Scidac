@@ -20,7 +20,7 @@ def to_np(x):
     return x.detach().cpu().numpy()
 
 
-def create_batch_latent(X, y, N_Max):
+def create_batch_latent(X, y, N_Max, repeat=0):
     idx = [np.random.randint(0, X.shape[0]) for _ in range(20)]
     obs_ = torch.from_numpy(X[idx, :].astype(np.float32).T).unsqueeze(2)
     ts_ = np.vstack(N_Max).astype(np.float32).reshape([-1, 1])
@@ -31,18 +31,42 @@ def create_batch_latent(X, y, N_Max):
     return obs_, ts_, ho_
 
 
-def create_batch_latent_order(X, y, N_Max):
-    idx = [i for i in range(X.shape[0])]
-    obs_ = torch.from_numpy(X[idx, :].astype(np.float32).T).unsqueeze(2)
-    ts_ = np.vstack(N_Max).astype(np.float32).reshape([-1, 1])
-    ts_ = torch.from_numpy(np.repeat(ts_, obs_.shape[1], axis=1)).unsqueeze(2)
-    ho_ = torch.from_numpy(
-        np.repeat(y[idx].astype(np.float32).reshape([1, -1]), obs_.shape[0], axis=0)
-    ).unsqueeze(2)
-    return obs_, ts_, ho_
+def create_batch_latent_order(X, y, N_Max, repeat=0):
+    if repeat ==0:
+        idx = [i for i in range(X.shape[0])]
+        obs_ = torch.from_numpy(X[idx, :].astype(np.float32).T).unsqueeze(2)
+
+
+        ts_ = np.vstack(N_Max).astype(np.float32).reshape([-1, 1])
+        ts_ = torch.from_numpy(np.repeat(ts_, obs_.shape[1], axis=1)).unsqueeze(2)
+        ho_ = torch.from_numpy(
+            np.repeat(y[idx].astype(np.float32).reshape([1, -1]), obs_.shape[0], axis=0)
+        ).unsqueeze(2)
+        return obs_, ts_, ho_
+    else:
+        # print("The value of repeat", repeat)
+        idx = [i for i in range(X.shape[0])]
+        obs_ = torch.from_numpy(X[idx, :].astype(np.float32).T).unsqueeze(2)
+        # print(N_Max.shape, obs_.shape)
+        N_Max = np.concatenate([N_Max+j*18 for j in range(repeat+1) ], axis=0)
+        N_Max = (N_Max/np.max(N_Max))
+
+        # print("that N_Max", N_Max, N_Max.shape[0], obs_[8,:,:].shape)
+        
+        stackable = torch.vstack([obs_[(obs_.shape[0]-1),:,:].unsqueeze(0)
+                     for i in range((N_Max.shape[0]-obs_.shape[0]))])        
+        # print("stackable", stackable.shape)
+        obs_ext= torch.concatenate([obs_, stackable ], axis=0)
+        ts_ = np.vstack(N_Max).astype(np.float32).reshape([-1, 1])
+        ts_ = torch.from_numpy(np.repeat(ts_, obs_.shape[1], axis=1)).unsqueeze(2)
+        ho_ = torch.from_numpy(np.repeat(y[idx].astype(np.float32).reshape([1, -1]), obs_ext.shape[0], axis=0)
+        ).unsqueeze(2)
+        return obs_, obs_ext, ts_, ho_
+        
 
 
 def conduct_experiment_latent(
+        
     X,
     step_model_optimizer_loss,
     save_path,
@@ -55,7 +79,7 @@ def conduct_experiment_latent(
     z0 = Variable(torch.Tensor([[0.6, 0.3]]))
     E = X[()]["data"][:, 1:]
     h_omega = X[()]["data"][:, 0] / 50
-    N_Max = X[()]["Nmax"].reshape([-1]) / 18
+    N_Max = X[()]["Nmax"].reshape([-1])
     n_points = h_omega.shape[0]
     noise_std = 1
     permutation = [np.random.randint(0, n_points) for k in range(10)]
@@ -68,15 +92,15 @@ def conduct_experiment_latent(
     for i in range(prev_epoch, epochs):
         if i > 10000:
             ode_trained.turnOffRelax()
-        obs_, ts_, ho_ = create_batch_latent(ETr, h_omegaT, N_Max)
-        input_d = torch.cat([obs_, ho_], axis=2).to(device)
+        obs_, obs_ext, ts_, ho_ = create_batch_latent_order(ETr, h_omegaT, N_Max, repeat=5)
+        input_d = torch.cat([obs_ext, ho_], axis=2).to(device)
         x_p, z, z_mean, z_log_var = ode_trained(input_d, ts_.to(device))
         kl_loss = -0.5 * torch.sum(
             1 + z_log_var - z_mean ** 2 - torch.exp(z_log_var), -1
         )
-        error_loss = 0.5 *(((input_d - x_p)**2)).sum(-1).sum(0) / noise_std ** 2
+        error_loss = 0.5 *(((input_d- x_p[obs_.shape[0],:,:])**2)).sum(-1).sum(0) / noise_std ** 2
         # error_loss_trans = (torch.log((input_d - x_p)**2)).sum(-1).sum(0)
-        loss = torch.mean(error_loss + 0.001*kl_loss)
+        loss = torch.mean(error_loss + 0.0001*kl_loss)
         optimizer_adam.zero_grad()
         loss.backward(retain_graph=True)
         optimizer_adam.step()
@@ -308,7 +332,7 @@ def plot_homega_average_(n_models, X, models_path):
     traj_var = []
     E = X[()]["data"][:, 1:]
     h_omega = X[()]["data"][:, 0] / 50
-    N_Max = X[()]["Nmax"].reshape([-1]) / 18
+    N_Max = X[()]["Nmax"].reshape([-1])/18
     obs_, ts_, ho_ = create_batch_latent_order(E, h_omega, N_Max)
     input_d = torch.cat([obs_, ho_], axis=2)
     for i in range(n_models):
@@ -317,10 +341,8 @@ def plot_homega_average_(n_models, X, models_path):
         samp_trajs_p = to_np(ode_trained.infer(input_d, ts_))
         traj_mean.append(np.mean(samp_trajs_p, axis=1))
         traj_var.append(np.std(samp_trajs_p, axis=1) ** 2)
-
     traj_mean = np.array(traj_mean)
     traj_var = np.array(traj_var)
-
     mu = np.mean(traj_mean, axis=0)
     var = np.mean(traj_var, axis=0)
 
@@ -341,16 +363,13 @@ def plot_homega_average_(n_models, X, models_path):
         c=samp_trajs_p[:, 0, 0],
         cmap=cm.plasma,
     )
-
     axes.scatter(
             (18 * ts_[:, 0, 0]).reshape([-1, 1]),
             np.mean(input_d[:, :, 0].numpy(), axis=1) ,
             label="original", marker="o",
             c=np.mean(input_d[:, :, 0].numpy(), axis=1),
             cmap=cm.viridis,
-        )
-
-
+    )
     axes.fill_between(
         18 * ts_[:, 0, 0].reshape([-1]),
         (mu[:, 0] - var[:, 0]).reshape([-1]),
@@ -358,11 +377,12 @@ def plot_homega_average_(n_models, X, models_path):
         color="gray",
         alpha=0.2,
     )
+
     axes.grid("True")
     axes.set_xlabel("NMax", fontsize=10)
     axes.legend(bbox_to_anchor=(1.05, 1.0), loc="upper left")
     axes.set_ylabel("Ground state Energy", fontsize=10)
-    axes.set_ylim(-31.5, -30)
+    axes.set_ylim(-31.5, -20)
     axes.set_xlim(left=4)
     plt.title("Ground State Energy averaged w.r.t. $\\overline{h} \\Omega$")
     plt.savefig(
@@ -377,7 +397,7 @@ def plot_model_averaged_(n_models, X, models_path):
     traj = []
     E = X[()]["data"][:, 1:]
     h_omega = X[()]["data"][:, 0] / 50
-    N_Max = X[()]["Nmax"].reshape([-1]) / 18
+    N_Max = (X[()]["Nmax"].reshape([-1])/18)
     ax_scale = 18
     # N_Max = np.arange(1000) * 0.2
     # ax_scale = 5
@@ -449,7 +469,7 @@ def plot_model_averaged_(n_models, X, models_path):
         if j % num_cols == 0:
             ax.set_ylabel("Ground state Energy", fontsize=10)
             ax.set_title("Ground State Energy averaged  w.r.t. models")
-        ax.set_ylim(-32.3, -30.5)
+        # ax.set_ylim(-32.3, -30.5)
         ax.set_xlim(left=4)
         ax.get_legend_handles_labels()
     handles, labels = plt.gca().get_legend_handles_labels()
@@ -460,6 +480,97 @@ def plot_model_averaged_(n_models, X, models_path):
         bbox_inches="tight",
     )
     plt.close()
+
+
+def plot_model_averaged_long_N_Max(n_models, X, models_path, repeat=1):
+    traj = []
+    E = X[()]["data"][:, 1:]
+    h_omega = X[()]["data"][:, 0] / 50
+    N_Max = (X[()]["Nmax"].reshape([-1]))
+    # N_Max = np.concatenate([N_Max+j*18 for j in range(2)], axis=0)
+    ax_scale = max(N_Max)*(repeat+1)
+    obs_, ts_, ho_ = create_batch_latent_order(E, h_omega, N_Max, repeat=repeat)
+    ts_ = ts_/ax_scale
+
+    print("what comes out", obs_.shape, ts_.shape, ho_.shape)
+    input_d = torch.cat([obs_, ho_], axis=2)
+    print(obs_.shape, ho_.shape, input_d.shape)
+    for i in range(n_models):
+        path = f"{models_path}/Trained_ode_{str(i)}"
+        _, ode_trained, _, _ = load_checkpoint(path)
+        samp_trajs_p = to_np(ode_trained.infer(input_d, ts_))
+        traj.append(samp_trajs_p[:, :, 0])
+
+
+    mu = np.mean(np.array(traj), axis=0)
+    var = np.std(np.array(traj), axis=0)
+
+    plt.figure()
+    num_cols = 4
+    num_rows = int(
+        np.ceil(len(h_omega[h_omega * 50 < 31]) / num_cols)
+    )  # limit plotted h_omega to up 30MeV
+    fig, axes = plt.subplots(
+        nrows=num_rows,
+        ncols=num_cols,
+        facecolor="white",
+        figsize=(16, 12),
+        gridspec_kw={"wspace": 0.5, "hspace": 0.5},
+        dpi=400,
+    )
+
+    # print("check before plotting", mu[:, 0].shape, input_d[:, 0, 0].shape)
+    axes = axes.flatten()
+    for j, ax in enumerate(axes):
+        ax.scatter(
+            (ax_scale * ts_[:,0,0]).reshape([-1, 1]),
+            mu[:, j],
+            label="predicted",
+            marker="*",
+            c=samp_trajs_p[:, j, 0],
+            cmap=cm.plasma,
+        )
+
+        ax.scatter(
+            (ax_scale * ts_[:,0,0]).reshape([-1, 1]),
+            input_d[:, j, 0].numpy(),
+            label="original",
+            marker="o",
+            c=input_d[:, j, 0].numpy(),
+
+            cmap=cm.viridis,
+        )
+
+        ax.errorbar(
+            (ax_scale * ts_[:, 0, 0]).reshape([-1]), mu[:, j].reshape([-1]), var[:, j].reshape([-1]),
+            color="gray",
+            alpha=0.4,
+        )
+
+        ax.axhline(y=-32.2, color="r")
+        ax.annotate("-32.2", (6, -33))
+        ax.grid("True")
+        ax.set_xlabel(
+            "NMax, \n h$\\Omega$ = " + str(np.round(ho_[0, j, 0].item() * 50, 2)),
+            fontsize=10,
+        )
+        if j % num_cols == 0:
+            ax.set_ylabel("Ground state Energy", fontsize=10)
+            ax.set_title("Ground State Energy averaged  w.r.t. models")
+        ax.set_ylim(-32.3, -20)
+        ax.set_xlim(0,50)
+        ax.get_legend_handles_labels()
+    handles, labels = plt.gca().get_legend_handles_labels()
+    fig.legend(handles, labels, loc="center right")
+    plt.savefig(
+        "Figures/reconstruction_extrapolation_model_averaged__long_NMax.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
+    plt.close()
+
+
+
 
 
 def load_checkpoint(path, device="cpu"):
@@ -475,8 +586,8 @@ def load_checkpoint(path, device="cpu"):
         step = checkpoint["step"]
         loss = checkpoint["loss"]
         model.load_state_dict(checkpoint["model_state_dict"])
-        # optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        
     return step, model, optimizer, loss
 
 
@@ -556,11 +667,11 @@ if __name__ == "__main__":
 
     plot_parser.add_argument("models_path", help="directory where models are stored")
     list_parser.add_argument("models_path", help="directory where models are stored")
-    list_parser.add_argument("-e", "--epochs", default=60000, type=int, help="number of epochs that define a complete training")
+    list_parser.add_argument("-e", "--epochs", default=100000, type=int, help="number of epochs that define a complete training")
     list_parser.add_argument("-i", "--incomplete", default=False, action="store_true", help="show models where training is incomplete only")
 
     train_parser.add_argument("models_path", help="directory where models are stored")
-    train_parser.add_argument("-e", "--epochs", default=60000, type=int, help="number of epochs to train for")
+    train_parser.add_argument("-e", "--epochs", default=100000, type=int, help="number of epochs to train for")
 
     args = parser.parse_args()
 
@@ -599,6 +710,8 @@ if __name__ == "__main__":
             step, _, _, loss = load_checkpoint(model_path, device=devices[i % num_devices])
             if step < args.epochs or (not args.incomplete):
                 print(f"Trained_ode_{str(i)}: step={step}, loss={loss}")
+
+                
     elif args.command == 'train':
         for i in range(n_models__):
             model_path = f"{args.models_path}/Trained_ode_{str(i)}"
@@ -608,7 +721,10 @@ if __name__ == "__main__":
         stuff = zip(range(len(odes)), odes, itertools.cycle(devices), model_paths, itertools.repeat(args.epochs))
         with mp.Pool(num_processes) as pool:
             pool.map(train_model, stuff)
+
+
     elif args.command == 'plot':
         X = np.load("data/processed_extrapolation.npy", allow_pickle=True)
         plot_homega_average_(n_models__, X, args.models_path)
         plot_model_averaged_(n_models__, X, args.models_path)
+        plot_model_averaged_long_N_Max(n_models__, X, args.models_path)

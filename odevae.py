@@ -5,11 +5,11 @@ import sys
 import numpy as np
 from odesolver import ForwardEuler, RRK
 
-ode_solver = ode_solver_relax = ForwardEuler(h_max=0.01)
-#method = "FE"; h_max = 0.01
-#method = "RK44"; h_max = 0.1
-#ode_solver = RRK(h_max=h_max, rkm=method, relaxation=False)
-#ode_solver_relax = RRK(h_max=h_max, rkm=method, relaxation=True)
+# ode_solver = ode_solver_relax = ForwardEuler(h_max=0.01)
+# method = "FE"; h_max = 0.01
+method = "RK44"; h_max = 0.1
+ode_solver = RRK(h_max=h_max, rkm=method, relaxation=False)
+ode_solver_relax = RRK(h_max=h_max, rkm=method, relaxation=True)
 
 ## Let us now figure out how to get a model.
 class ODEF(nn.Module):

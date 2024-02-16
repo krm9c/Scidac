@@ -30,6 +30,6 @@ source ~/miniconda3/etc/profile.d/conda.sh
 conda activate ML__torch
 
 python test_models.py train models
-python test_models.py list models
+# python test_models.py list models
 
 conda deactivate
