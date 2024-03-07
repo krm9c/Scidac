@@ -5,7 +5,6 @@ nuclear-extrapolation*
 extrapolation-output/
 Figures/training
 Figures_old/
-models*/
 
 # JSRUN output
 *.out
