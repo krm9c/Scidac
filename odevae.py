@@ -277,7 +277,6 @@ class NeuralODEDecoder(nn.Module):
 
     def forward(self, z0, t):
         zs = self.ode(z0, t, return_whole_sequence=True)
-
         hs = self.l2h(zs)
         xs = self.h2o(hs)
         return xs
