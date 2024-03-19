@@ -48,7 +48,8 @@ def create_batch_latent_order(X, y, N_Max, repeat=0):
         obs_ = torch.from_numpy(X[idx, :].astype(np.float32).T).unsqueeze(2)
         # print(N_Max.shape, obs_.shape)
         N_Max = np.concatenate([N_Max+j*18 for j in range(repeat+1) ], axis=0)
-        N_Max = (N_Max/np.max(N_Max))
+        scale = np.max(N_Max)
+        N_Max = (N_Max/scale)
         # print("that N_Max", N_Max, N_Max.shape[0], obs_[8,:,:].shape)
         stackable = torch.vstack([obs_[(obs_.shape[0]-1),:,:].unsqueeze(0)
                      for i in range((N_Max.shape[0]-obs_.shape[0]))])        
@@ -62,7 +63,7 @@ def create_batch_latent_order(X, y, N_Max, repeat=0):
         ).unsqueeze(2)
 
         # print(obs_.shape, obs_ext.shape, ts_.shape, ho_.shape)
-        return obs_, obs_ext, ts_, ho_
+        return obs_, obs_ext, ts_, ho_,  scale
         
 
 
@@ -75,7 +76,7 @@ def conduct_experiment_latent(
     epochs=5000,
     save_iter=10000,
     print_iter=10000,
-    plot_progress=False,
+    plot_progress=True,
 ):
     z0 = Variable(torch.Tensor([[0.6, 0.3]]))
     E = X[()]["data"][:, 1:]
@@ -91,30 +92,32 @@ def conduct_experiment_latent(
     print("Starting training from epoch ", prev_epoch, flush=True)
     begin_time = time.time()
     for i in range(prev_epoch, epochs):
-        if i > 10000:
+        if i > 1:
             ode_trained.turnOffRelax()
-        obs_, obs_ext, ts_, ho_ = create_batch_latent_order(ETr, h_omegaT, N_Max, repeat=5)
+        obs_, obs_ext, ts_, ho_, scale = create_batch_latent_order(ETr, h_omegaT, N_Max, repeat=5)
         input_d = torch.cat([obs_ext, ho_], axis=2).to(device)
         x_p, z, z_mean, z_log_var = ode_trained(input_d, ts_.to(device))
         kl_loss = -0.5 * torch.sum( 1 + z_log_var - z_mean ** 2 - torch.exp(z_log_var), -1)
         error_loss = 0.5 *(((input_d[:9,:,:]- x_p[:9,:,:])**2)).sum(-1).sum(0) / noise_std ** 2
-        loss = torch.mean(error_loss + 0.0001*kl_loss)
+        ts_del = (ts_[9:,:,:]- ts_[8:-1,:,:]).to(device)
+        error_grad = torch.linalg.norm( (x_p[9:,:,:]- x_p[8:-1,:,:])/ts_del)
+        loss = torch.mean(error_loss + (kl_loss))+ error_grad
         optimizer_adam.zero_grad()
         loss.backward(retain_graph=True)
         optimizer_adam.step()
-        if i % print_iter == 0:
-            print(
-                "(Print) Epoch:",
-                i,
-                "Total_Loss: " + str(loss.item()) + " with error",
-                str(torch.mean(error_loss).item())
-                + " KL divergence "
-                + str(torch.mean(kl_loss).item()),
-                flush=True,
-            )
+        # if i % print_iter == 0:
+        #     print(
+        #         "(Print) Epoch:",
+        #         i,
+        #         "Total_Loss: " + str(loss.item()) + " with error",
+        #         str(torch.mean(error_loss).item())
+        #         + " KL divergence "
+        #         + str(torch.mean(kl_loss).item()),
+        #         flush=True,
+        #     )
         if i % save_iter == 0 or i == epochs:
             end_time = time.time()
-            print(f"(Save)({(end_time-begin_time):.2f}s) Epoch: {i} Total Loss: {str(loss.item())} with error {str(torch.mean(error_loss).item())} KL divergence {str(torch.mean(kl_loss).item())}", flush=True)
+            print(f"(Save)({(end_time-begin_time):.2f}s) Epoch: {i} Total Loss: {str(loss.item())} with error {str(torch.mean(error_loss).item())} with grad {str(error_grad.item())}   KL divergence {str(torch.mean(kl_loss).item())}", flush=True)
             begin_time = time.time()
             torch.save(
                 {
@@ -125,8 +128,8 @@ def conduct_experiment_latent(
                 },
                 save_path,
             )
-            obs_, ts_, ho_, ax_scale = create_batch_latent_order(E, h_omega, N_Max, repeat=5)
-            input_d = torch.cat([obs_, ho_], axis=2).to(device)
+            obs_, obs_ext, ts_, ho_, ax_scale = create_batch_latent_order(E, h_omega, N_Max, repeat=5)
+            input_d = torch.cat([obs_ext, ho_], axis=2).to(device)
             samp_trajs_p = to_np(
                 ode_trained.generate_with_seed(input_d, ts_.to(device))
             )
@@ -177,12 +180,12 @@ def conduct_experiment_latent(
                     + "\n with error: "
                     + str(np.round(torch.mean(error_loss).item(), 2))
                     + " \n KL divergence: "
-                    + str(np.round(torch.mean(kl_loss).item(), 2)),
+                    + str(np.round(torch.mean(kl_loss).item(), 2)) + " \n grad: "
+                    + str(np.round(torch.mean(error_grad).item(), 2)),
                 )
-                fig_path = f"{save_path}/figures/"
+                fig_path ="Figures/"
                 pathlib.Path(fig_path).mkdir(parents=True, exist_ok=True)
-                plt.savefig(
-                    fig_path + f"reconstruction_{str(i)}.png",
+                plt.savefig("Figures/reconstruction_"+str(i)+str(device)+".png",
                     dpi=100,
                     bbox_inches="tight",
                 )
@@ -472,7 +475,7 @@ def train_model(stuff):
     lock_model(model_path)
     
     conduct_experiment_latent(
-        X, model, model_path, device=device, epochs=epochs, save_iter=500, print_iter=500
+        X, model, model_path, device=device, epochs=epochs, save_iter=1000, print_iter=1000
     )
 
     unlock_model(model_path)
@@ -526,11 +529,11 @@ if __name__ == "__main__":
 
     plot_parser.add_argument("models_path", help="directory where models are stored")
     list_parser.add_argument("models_path", help="directory where models are stored")
-    list_parser.add_argument("-e", "--epochs", default=100000, type=int, help="number of epochs that define a complete training")
+    list_parser.add_argument("-e", "--epochs", default=10000, type=int, help="number of epochs that define a complete training")
     list_parser.add_argument("-i", "--incomplete", default=False, action="store_true", help="show models where training is incomplete only")
 
     train_parser.add_argument("models_path", help="directory where models are stored")
-    train_parser.add_argument("-e", "--epochs", default=100000, type=int, help="number of epochs to train for")
+    train_parser.add_argument("-e", "--epochs", default=10000, type=int, help="number of epochs to train for")
 
     args = parser.parse_args()
 
@@ -543,7 +546,7 @@ if __name__ == "__main__":
             torch.device("cuda:%d" % i) for i in range(torch.cuda.device_count())
         ]
         num_devices = len(devices)
-        num_processes = 1
+        num_processes = num_devices
         if args.num_processes is not None:
             num_processes = int(args.num_processes)
     else:
@@ -560,7 +563,7 @@ if __name__ == "__main__":
 
     odes = []
     model_paths = []
-    n_models__ = 1
+    n_models__ = 3
 
     mp.set_start_method("spawn")
     if args.command == 'list':
