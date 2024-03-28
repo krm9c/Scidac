@@ -67,6 +67,7 @@ def create_batch_latent_order(X, y, N_Max, repeat=0):
         return obs_, obs_ext, ts_, ho_,  scale
         
 
+import copy
 
 def conduct_experiment_latent(
         
@@ -92,17 +93,23 @@ def conduct_experiment_latent(
     prev_epoch, ode_trained, optimizer_adam, prev_loss = step_model_optimizer_loss
     print("Starting training from epoch ", prev_epoch, flush=True)
     begin_time = time.time()
+    obs_, obs_ext, ts_, ho_, scale = create_batch_latent_order(ETr, h_omegaT, N_Max, repeat=5)
+    weights = copy.deepcopy(ts_[9:-1,0,0]).to(device)
+    scheduler = 1e-3
+    start     = 0.0009320653479069899
     for i in range(prev_epoch, epochs):
-        if i > 1:
+        if i > 100000:
             ode_trained.turnOffRelax()
-        obs_, obs_ext, ts_, ho_, scale = create_batch_latent_order(ETr, h_omegaT, N_Max, repeat=5)
+        obs_, obs_ext, ts_, ho_, _ = create_batch_latent_order(ETr, h_omegaT, N_Max, repeat=5)
         input_d = torch.cat([obs_ext, ho_], axis=2).to(device)
         x_p, z, z_mean, z_log_var = ode_trained(input_d, ts_.to(device))
         kl_loss = -0.5 * torch.sum( 1 + z_log_var - z_mean ** 2 - torch.exp(z_log_var), -1)
-        error_loss = 0.5 *(((input_d[:10,:,:]- x_p[:10,:,:])**2)).sum(-1).sum(0) / noise_std ** 2
-        ts_del = (ts_[11:,:,:]- ts_[10:-1,:,:]).to(device)
-        error_grad = torch.linalg.norm( (x_p[11:,:,:]- x_p[10:-1,:,:])/ts_del )
-        loss = torch.mean(error_loss + 0.0001*(kl_loss+error_grad))
+        error_loss = 0.5 *(((input_d[:9,:,:]- x_p[:9,:,:])**2)).sum(-1).sum(0) / noise_std ** 2
+        ts_del = (ts_[10:,:,:]- ts_[9:-1,:,:]).to(device)
+        error_grad = weights* torch.sqrt( torch.sum( torch.sum( ( (x_p[10:,:,:]- x_p[9:-1,:,:])/ts_del )**2, axis = 2) , axis = 1) )
+        error_grad = torch.sum(error_grad)
+        loss = torch.mean(error_loss + scheduler*(kl_loss + error_grad))
+        
         optimizer_adam.zero_grad()
         loss.backward(retain_graph=True)
         optimizer_adam.step()
@@ -130,8 +137,14 @@ def conduct_experiment_latent(
                     "loss": loss,
                 },
                 save_path,
-            )
+            )   
             
+            
+            if scheduler >1e-9:
+                scheduler = scheduler*0.99
+            else:
+                scheduler = start/(i+1)
+                    
             obs_, obs_ext, ts_, ho_, ax_scale = create_batch_latent_order(E, h_omega, N_Max, repeat=5)
             input_d = torch.cat([obs_ext, ho_], axis=2).to(device)
             samp_trajs_p = to_np(
@@ -139,7 +152,6 @@ def conduct_experiment_latent(
             )
             
             # print(samp_trajs_p.shape)
-
             if plot_progress:
                 plt.figure()
                 fig, axes = plt.subplots(
@@ -177,17 +189,21 @@ def conduct_experiment_latent(
                         ax.legend(bbox_to_anchor=(1.05, 1.0), loc="upper left")
                     if j == 0 or j == 6 or j == 12:
                         ax.set_ylabel("Ground state Energy", fontsize=10)
-                plt.text(
-                    20,
-                    75,
-                    "\n Total loss: "
-                    + str(np.round(loss.item(), 2))
-                    + "\n with error: "
-                    + str(np.round(torch.mean(error_loss).item(), 2))
-                    + " \n KL divergence: "
-                    + str(np.round(torch.mean(kl_loss).item(), 2)) + " \n grad: "
-                    + str(np.round(torch.mean(error_grad).item(), 2)),
-                )
+                        
+                        
+                    ax.set_ylim([-32.3, -30.5])
+                    ax.set_xlim(0,20)
+                # plt.text(
+                #     20,
+                #     0,
+                #     "\n Total loss: "
+                #     + str(np.round(loss.item(), 2))
+                #     + "\n with error: "
+                #     + str(np.round(torch.mean(error_loss).item(), 2))
+                #     + " \n KL divergence: "
+                #     + str(np.round(torch.mean(kl_loss).item(), 2)) + " \n grad: "
+                #     + str(np.round(torch.mean(error_grad).item(), 2)),
+                # )
                 fig_path ="Figures/"
                 pathlib.Path(fig_path).mkdir(parents=True, exist_ok=True)
                 plt.savefig("Figures/reconstruction_"+str(i)+str(device)+".png",
@@ -208,7 +224,7 @@ def plot_homega_average_(n_models, X, models_path, repeat):
     obs_, obs_ext, ts_, ho_, ax_scale = create_batch_latent_order(E, h_omega, N_Max, repeat=repeat)
     print(ts_.shape, ho_.shape)
     input_d = torch.cat([obs_ext, ho_], axis=2)
-    for i in range(n_models):
+    for i in n_models:
         path = f"{models_path}/Trained_ode_{str(i)}"
         _, ode_trained, _, _ = load_checkpoint(path)
         samp_trajs_p = to_np(ode_trained.infer(input_d, ts_))
@@ -274,7 +290,7 @@ def plot_model_averaged_(n_models, X, models_path, repeat=4):
     obs_,obs_ext, ts_, ho_, ax_scale = create_batch_latent_order(E, h_omega, N_Max, repeat=4)
     input_d = torch.cat([obs_ext, ho_], axis=2)
     print(obs_.shape, ho_.shape, input_d.shape)
-    for i in range(n_models):
+    for i in n_models:
         path = f"{models_path}/Trained_ode_{str(i)}"
         _, ode_trained, _, _ = load_checkpoint(path)
         samp_trajs_p = to_np(ode_trained.infer(input_d, ts_))
@@ -360,7 +376,7 @@ def plot_model_averaged_long_N_Max(n_models, X, models_path, repeat=4):
     print("what comes out", obs_.shape, ts_.shape, ho_.shape)
     input_d = torch.cat([obs_, ho_], axis=2)
     print(obs_.shape, ho_.shape, input_d.shape)
-    for i in range(n_models):
+    for i in n_models:
         path = f"{models_path}/Trained_ode_{str(i)}"
         _, ode_trained, _, _ = load_checkpoint(path)
         samp_trajs_p = to_np(ode_trained.infer(input_d, ts_))
@@ -443,7 +459,7 @@ def load_checkpoint(path, device="cpu"):
     loss = 0
     model = ODEVAE(2,  512, 10)
     model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
     print("Initialized without checkpointing")
     if os.path.exists(path):
         print("load from checkpoint")
@@ -478,7 +494,8 @@ def train_model(stuff):
     lock_model(model_path)
     
     conduct_experiment_latent(
-        X, model, model_path, device=device, epochs=epochs, save_iter=1000, print_iter=1000
+        X, model, model_path, device=device, epochs=epochs, save_iter=1000
+        , print_iter=1000
     )
 
     unlock_model(model_path)
@@ -529,21 +546,19 @@ if __name__ == "__main__":
     train_parser = subparsers.add_parser("train")
     plot_parser = subparsers.add_parser("plot")
     list_parser = subparsers.add_parser("list")
-
+    
     plot_parser.add_argument("models_path", help="directory where models are stored")
     list_parser.add_argument("models_path", help="directory where models are stored")
     list_parser.add_argument("-e", "--epochs", default=25000, type=int, help="number of epochs that define a complete training")
     list_parser.add_argument("-i", "--incomplete", default=False, action="store_true", help="show models where training is incomplete only")
-
     train_parser.add_argument("models_path", help="directory where models are stored")
     train_parser.add_argument("-e", "--epochs", default=25000, type=int, help="number of epochs to train for")
 
-    args = parser.parse_args()
 
+    args = parser.parse_args()
     use_cuda = args.cuda
     if use_cuda:
         use_cuda = torch.cuda.is_available()
-
     if use_cuda:
         devices = [
             torch.device("cuda:%d" % i) for i in range(torch.cuda.device_count())
@@ -566,11 +581,11 @@ if __name__ == "__main__":
 
     odes = []
     model_paths = []
-    n_models__ = 3
+    n_models__ = [0, 1, 2]
 
     mp.set_start_method("spawn")
     if args.command == 'list':
-        for i in range(n_models__):
+        for i in n_models__:
             model_path = f"{args.models_path}/Trained_ode_{str(i)}"
             step, _, _, loss = load_checkpoint(model_path, device=devices[i % num_devices])
             if step < args.epochs or (not args.incomplete):
@@ -578,7 +593,7 @@ if __name__ == "__main__":
 
                 
     elif args.command == 'train':
-        for i in range(n_models__):
+        for i in n_models__:
             model_path = f"{args.models_path}/Trained_ode_{str(i)}"
             model_paths.append(model_path)
             checkpoint = load_checkpoint(model_path, device=devices[i % num_devices])
@@ -591,7 +606,6 @@ if __name__ == "__main__":
     elif args.command == 'plot':
         X = np.load("data/processed_extrapolation.npy", allow_pickle=True)
         repeat = 4
-        scale =repeat*18
-        plot_homega_average_(n_models__, X, args.models_path, scale)
-        plot_model_averaged_(n_models__, X, args.models_path, scale)
+        plot_homega_average_(n_models__, X, args.models_path, repeat=repeat)
+        plot_model_averaged_(n_models__, X, args.models_path, repeat=repeat)
         plot_model_averaged_long_N_Max(n_models__, X, args.models_path, repeat = repeat)
