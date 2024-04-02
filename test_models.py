@@ -79,6 +79,7 @@ def conduct_experiment_latent(
     save_iter=10000,
     print_iter=10000,
     plot_progress=True,
+    repeat=5
 ):
     z0 = Variable(torch.Tensor([[0.6, 0.3]]))
     E = X[()]["data"][:, 1:]
@@ -93,14 +94,14 @@ def conduct_experiment_latent(
     prev_epoch, ode_trained, optimizer_adam, prev_loss = step_model_optimizer_loss
     print("Starting training from epoch ", prev_epoch, flush=True)
     begin_time = time.time()
-    obs_, obs_ext, ts_, ho_, scale = create_batch_latent_order(ETr, h_omegaT, N_Max, repeat=5)
+    obs_, obs_ext, ts_, ho_, scale = create_batch_latent_order(ETr, h_omegaT, N_Max, repeat=repeat)
     weights = copy.deepcopy(ts_[9:-1,0,0]).to(device)
-    scheduler = 1e-3
-    start     = 0.0009320653479069899
+    scheduler = 1
+    start     = 1
     for i in range(prev_epoch, epochs):
-        if i > 100000:
+        if i > 1:
             ode_trained.turnOffRelax()
-        obs_, obs_ext, ts_, ho_, _ = create_batch_latent_order(ETr, h_omegaT, N_Max, repeat=5)
+        obs_, obs_ext, ts_, ho_, _ = create_batch_latent_order(ETr, h_omegaT, N_Max, repeat=repeat)
         input_d = torch.cat([obs_ext, ho_], axis=2).to(device)
         x_p, z, z_mean, z_log_var = ode_trained(input_d, ts_.to(device))
         kl_loss = -0.5 * torch.sum( 1 + z_log_var - z_mean ** 2 - torch.exp(z_log_var), -1)
@@ -109,10 +110,10 @@ def conduct_experiment_latent(
         error_grad = weights* torch.sqrt( torch.sum( torch.sum( ( (x_p[10:,:,:]- x_p[9:-1,:,:])/ts_del )**2, axis = 2) , axis = 1) )
         error_grad = torch.sum(error_grad)
         loss = torch.mean(error_loss + scheduler*(kl_loss + error_grad))
-        
         optimizer_adam.zero_grad()
         loss.backward(retain_graph=True)
         optimizer_adam.step()
+        
         
         # if i % print_iter == 0:
         #     print(
@@ -141,7 +142,7 @@ def conduct_experiment_latent(
             
             
             if scheduler >1e-9:
-                scheduler = scheduler*0.99
+                scheduler = scheduler*0.1
             else:
                 scheduler = start/(i+1)
                     
@@ -164,11 +165,14 @@ def conduct_experiment_latent(
                 )
                 axes = axes.flatten()
                 for j, ax in enumerate(axes):
-                    ax.plot(
+                    ax.scatter(
                         ax_scale* to_np(ts_[:, j, 0]),
                         to_np(input_d[:, j, 0]),
+                        6,
                         label="real",
-                        linewidth=1,
+                        marker="o",
+                        c=input_d[:, j, 0].cpu().numpy(),
+                        cmap=cm.viridis,
                     )
                     ax.scatter(
                         ax_scale * ts_[:, j, 0],
@@ -189,10 +193,9 @@ def conduct_experiment_latent(
                         ax.legend(bbox_to_anchor=(1.05, 1.0), loc="upper left")
                     if j == 0 or j == 6 or j == 12:
                         ax.set_ylabel("Ground state Energy", fontsize=10)
-                        
-                        
+                    
                     ax.set_ylim([-32.3, -30.5])
-                    ax.set_xlim(0,20)
+                    ax.set_xlim(0,25)
                 # plt.text(
                 #     20,
                 #     0,
@@ -287,7 +290,7 @@ def plot_model_averaged_(n_models, X, models_path, repeat=4):
     E = X[()]["data"][:, 1:]
     h_omega = X[()]["data"][:, 0] / 50
     N_Max = (X[()]["Nmax"].reshape([-1]))
-    obs_,obs_ext, ts_, ho_, ax_scale = create_batch_latent_order(E, h_omega, N_Max, repeat=4)
+    obs_,obs_ext, ts_, ho_, ax_scale = create_batch_latent_order(E, h_omega, N_Max, repeat=repeat)
     input_d = torch.cat([obs_ext, ho_], axis=2)
     print(obs_.shape, ho_.shape, input_d.shape)
     for i in n_models:
@@ -467,13 +470,13 @@ def load_checkpoint(path, device="cpu"):
         step = checkpoint["step"]
         loss = checkpoint["loss"]
         model.load_state_dict(checkpoint["model_state_dict"])
-        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        # optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         
     return step, model, optimizer, loss
 
 
 def train_model(stuff):
-    i, model, device, model_path, epochs = stuff
+    i, model, device, model_path, epochs, save_it = stuff
     print("Starting to train")
     # Register a handler for SIGTERM which removes the lock on the model.
     def sigterm_handler(*args):
@@ -494,8 +497,8 @@ def train_model(stuff):
     lock_model(model_path)
     
     conduct_experiment_latent(
-        X, model, model_path, device=device, epochs=epochs, save_iter=1000
-        , print_iter=1000
+        X, model, model_path, device=device, epochs=epochs, save_iter=save_it
+        , print_iter=save_it
     )
 
     unlock_model(model_path)
@@ -552,6 +555,7 @@ if __name__ == "__main__":
     list_parser.add_argument("-e", "--epochs", default=25000, type=int, help="number of epochs that define a complete training")
     list_parser.add_argument("-i", "--incomplete", default=False, action="store_true", help="show models where training is incomplete only")
     train_parser.add_argument("models_path", help="directory where models are stored")
+    train_parser.add_argument("-s", "--save", default=1000, type=int, help="frequency of save")
     train_parser.add_argument("-e", "--epochs", default=25000, type=int, help="number of epochs to train for")
 
 
@@ -598,14 +602,14 @@ if __name__ == "__main__":
             model_paths.append(model_path)
             checkpoint = load_checkpoint(model_path, device=devices[i % num_devices])
             odes.append(checkpoint)
-        stuff = zip(range(len(odes)), odes, itertools.cycle(devices), model_paths, itertools.repeat(args.epochs))
+        stuff = zip(range(len(odes)), odes, itertools.cycle(devices), model_paths, itertools.repeat(args.epochs), itertools.repeat(args.save))
         with mp.Pool(num_processes) as pool:
             pool.map(train_model, stuff)
 
 
     elif args.command == 'plot':
         X = np.load("data/processed_extrapolation.npy", allow_pickle=True)
-        repeat = 4
+        repeat = 5
         plot_homega_average_(n_models__, X, args.models_path, repeat=repeat)
         plot_model_averaged_(n_models__, X, args.models_path, repeat=repeat)
         plot_model_averaged_long_N_Max(n_models__, X, args.models_path, repeat = repeat)
