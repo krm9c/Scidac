@@ -1,9 +1,9 @@
 #!/bin/bash -l
 #PBS -N nuclear-exptrapolation
 #PBS -l filesystems=home:eagle
-#PBS -l walltime=3:00:00
-#PBS -l select=10
-#PBS -q prod
+#PBS -l walltime=00:10:00
+#PBS -l select=2:ncpus=64
+#PBS -q debug
 #PBS -A ExtraNuc
 
 date
@@ -17,14 +17,8 @@ source profile.polaris
 #export MPICH_GPU_SUPPORT_ENABLED=1
 
 # For testing in debug-scaling
-#NNODES=2
-#NRANKS=8
-#NDEPTH=1
-#NTOTRANKS=$(( NNODES * NRANKS ))
-
-# For running in preemptable/prod
-NNODES=10
-NRANKS=10
+NNODES=2
+NRANKS=8
 NDEPTH=1
 NTOTRANKS=$(( NNODES * NRANKS ))
 

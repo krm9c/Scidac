@@ -153,7 +153,7 @@ def conduct_experiment_latent(
             )
             
             # print(samp_trajs_p.shape)
-            if plot_progress:
+            if (i % save_iter == 0) and plot_progress:
                 plt.figure()
                 fig, axes = plt.subplots(
                     nrows=3,
@@ -470,7 +470,7 @@ def load_checkpoint(path, device="cpu"):
         step = checkpoint["step"]
         loss = checkpoint["loss"]
         model.load_state_dict(checkpoint["model_state_dict"])
-        # optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         
     return step, model, optimizer, loss
 
@@ -585,7 +585,8 @@ if __name__ == "__main__":
 
     odes = []
     model_paths = []
-    n_models__ = [0, 1, 2]
+    #n_models__ = [0, 1, 2]
+    n_models__ = list(range(100))
 
     mp.set_start_method("spawn")
     if args.command == 'list':
