@@ -11,6 +11,7 @@ method = "RK44"; h_max = 0.1
 ode_solver = RRK(h_max=h_max, rkm=method, relaxation=False)
 ode_solver_relax = RRK(h_max=h_max, rkm=method, relaxation=True)
 
+#---------------------------------------
 ## Let us now figure out how to get a model.
 class ODEF(nn.Module):
     def forward_with_grad(self, z, t, grad_outputs):
@@ -225,42 +226,42 @@ class NNODEF(ODEF):
             self.lin1 = nn.Linear(in_dim, hid_dim)
         else:
             self.lin1 = nn.Linear(in_dim + 1, hid_dim)
-        self.lin2 = nn.Linear(hid_dim, hid_dim)
-        self.lin3 = nn.Linear(hid_dim, in_dim)
-        self.elu = nn.ELU(inplace=True)
-
+        self.lin2 = nn.Linear(hid_dim, in_dim)
+        self.lin3 = nn.Linear(in_dim, in_dim)
+        self.elu = nn.ReLU(inplace=True)
+        self.ls = nn.LogSigmoid()
+        
     def forward(self, x, t):
         if not self.time_invariant:
             x = torch.cat((x, t.reshape([1, -1])), dim=-1)
-        h = self.elu(self.lin1(x))
-        h = self.elu(self.lin2(h))
-        out = self.lin3(h)
-        return out
+        x = self.elu(self.lin1(x))
+        h = -1*self.ls(self.lin2(x))
+        return self.lin3(h)+h
+        
+        
+# class RNNEncoder(nn.Module):
+#     def __init__(self, input_dim, hidden_dim, latent_dim):
+#         super(RNNEncoder, self).__init__()
+#         self.input_dim = input_dim
+#         self.hidden_dim = hidden_dim
+#         self.latent_dim = latent_dim
 
+#         self.rnn = nn.GRU(input_dim + 1, hidden_dim)
+#         self.hid2lat = nn.Linear(hidden_dim, 2 * latent_dim)
 
-class RNNEncoder(nn.Module):
-    def __init__(self, input_dim, hidden_dim, latent_dim):
-        super(RNNEncoder, self).__init__()
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.latent_dim = latent_dim
+#     def forward(self, x, t):
+#         # Concatenate time to input
+#         t = t.clone()
+#         t[1:] = t[:-1] - t[1:]
+#         t[0] = 0.0
+#         xt = torch.cat((x, t), dim=-1)
 
-        self.rnn = nn.GRU(input_dim + 1, hidden_dim)
-        self.hid2lat = nn.Linear(hidden_dim, 2 * latent_dim)
-
-    def forward(self, x, t):
-        # Concatenate time to input
-        t = t.clone()
-        t[1:] = t[:-1] - t[1:]
-        t[0] = 0.0
-        xt = torch.cat((x, t), dim=-1)
-
-        _, h0 = self.rnn(xt.flip((0,)))  # Reversed
-        # Compute latent dimension
-        z0 = self.hid2lat(h0[0])
-        z0_mean = z0[:, : self.latent_dim]
-        z0_log_var = z0[:, self.latent_dim :]
-        return z0_mean, z0_log_var
+#         _, h0 = self.rnn(xt.flip((0,)))  # Reversed
+#         # Compute latent dimension
+#         z0 = self.hid2lat(h0[0])
+#         z0_mean = z0[:, : self.latent_dim]
+#         z0_log_var = z0[:, self.latent_dim :]
+#         return z0_mean, z0_log_var
 
 
 class NeuralODEDecoder(nn.Module):
@@ -272,13 +273,16 @@ class NeuralODEDecoder(nn.Module):
 
         func = NNODEF(latent_dim, hidden_dim, time_invariant=True)
         self.ode = NeuralODE(func)
-        self.l2h = nn.Linear(latent_dim, hidden_dim)
-        self.h2o = nn.Linear(hidden_dim, output_dim)
+        # self.l2h = nn.Linear(latent_dim, hidden_dim)
+        # self.h2o = nn.Linear(hidden_dim, output_dim)
 
     def forward(self, z0, t):
-        zs = self.ode(z0, t, return_whole_sequence=True)
-        hs = self.l2h(zs)
-        xs = self.h2o(hs)
+        # print("decoder", z0.shape)
+        xs = self.ode(z0, t, return_whole_sequence=True)
+        # print(xs.shape)
+        
+        # hs = self.l2h(zs)
+        # xs = self.h2o(hs)
         return xs
 
 
@@ -288,9 +292,9 @@ class ODEVAE(nn.Module):
         self.output_dim = output_dim
         self.hidden_dim = hidden_dim
         self.latent_dim = latent_dim
-
-        self.encoder = RNNEncoder(output_dim, hidden_dim, latent_dim)
-        self.decoder = NeuralODEDecoder(output_dim, hidden_dim, latent_dim)
+        print(output_dim, hidden_dim, output_dim)
+        # self.encoder = RNNEncoder(output_dim, hidden_dim, latent_dim)
+        self.decoder = NeuralODEDecoder(output_dim, hidden_dim, output_dim)
 
     def turnOffRelax(self):
         self.decoder.ode.turnOffRelax()
@@ -299,20 +303,22 @@ class ODEVAE(nn.Module):
         self.decoder.ode.turnOnRelax()
 
     def forward(self, x, t, MAP=False):
-        z_mean, z_log_var = self.encoder(x, t)
-        if MAP:
-            z = z_mean
-        else:
-            z = z_mean + torch.randn_like(z_mean) * torch.exp(0.5 * z_log_var)
-        x_p = self.decoder(z, t)
-        return x_p, z, z_mean, z_log_var
+        # z_mean, z_log_var = self.encoder(x, t)
+        # if MAP:
+        #     z = z_mean
+        # else:
+        #     z = z_mean + torch.randn_like(z_mean) * torch.exp(0.5 * z_log_var)
+        # print("going into decoder", x[0,:,:].shape)
+        x_p = self.decoder(x[0,:,:], t)
+        
+        return x_p, x, x, x
 
     def infer(self, seed_x, t):
         self.turnOffRelax() # no relaxation when inferring
         return self.generate_with_seed(seed_x, t)
 
     def generate_with_seed(self, seed_x, t):
-        seed_t_len = seed_x.shape[0]
-        z_mean, z_log_var = self.encoder(seed_x, t[:seed_t_len])
-        x_p = self.decoder(z_mean, t)
+        # seed_t_len = seed_x.shape[0]
+        # z_mean, _= self.encoder(seed_x, t[:seed_t_len])
+        x_p = self.decoder(seed_x[0,:,:], t)
         return x_p

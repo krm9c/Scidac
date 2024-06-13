@@ -66,11 +66,9 @@ def create_batch_latent_order(x, y, N_Max, repeat=0):
         # print(obs_.shape, obs_ext.shape, ts_.shape, ho_.shape)
         return obs_, obs_ext, ts_, ho_,  scale
         
-
+import matplotlib
 import copy
-
 def conduct_experiment_latent(
-        
     X,
     step_model_optimizer_loss,
     save_path,
@@ -81,88 +79,115 @@ def conduct_experiment_latent(
     plot_progress=True,
     repeat=5
 ):
-    z0 = Variable(torch.Tensor([[0.6, 0.3]]))
-    ETr = X[()]["data"][:, 1:]
-    h_omega = X[()]["data"][:, 0] / 50
+    N_Max_points = 9
+    N_max_constraints=20
+    hbaromega_choose= 5
+    
+    # z0 = Variable(torch.Tensor([[0.6, 0.3]]))
+    
+    ETr = X[()]["data"][1:hbaromega_choose,1:]
+    h_omega = X[()]["data"][1:hbaromega_choose, 0] / 50
     N_Max = X[()]["Nmax"].reshape([-1])
-    n_points = h_omega.shape[0]
+    # print(ETr.shape, N_Max.shape, h_omega.shape)
+    # n_points = h_omega.shape[0]
     noise_std = 1
-    permutation = [np.random.randint(0, n_points) for k in range(10)]
     # Train Neural ODE
     prev_epoch, ode_trained, optimizer_adam, prev_loss = step_model_optimizer_loss
-    print("Starting training from epoch ", prev_epoch, flush=True)
+    # print("Starting training from epoch ", prev_epoch, prev_loss, flush=True)
     begin_time = time.time()
-    obs_, obs_ext, ts_, ho_, scale = create_batch_latent_order(ETr, h_omega, N_Max, repeat=repeat)
+    _, obs_ext, ts_, ho_, scale = create_batch_latent_order(ETr, h_omega,\
+    N_Max, repeat=repeat)
     input_d = torch.cat([obs_ext, ho_], axis=2).to(device)
-    weights = copy.deepcopy(ts_[9:-1,0,0]).to(device)
-    scheduler = 1e-03
-    # optimizer_adam = torch.optim.LBFGS(ode_trained.parameters(),
-    #                 history_size=100,
-    #                 max_iter=10,
-    #                 line_search_fn="strong_wolfe")
+    scheduler = [1, 1, 1, 1]
+    colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple', 'tab:brown', 'tab:pink',\
+            'tab:cyan', 'doggerblue', 'violet', 'orangered', 'maroon', 'darkorange', 'burlywood', 'greenyellow',\
+            'tab:gray', 'black', 'rosybrown', 'lightseagreen', 'teal', 'aqua', 'darkolivegreen']
     
-    print("prev epoch", prev_epoch, epochs)
-
-    for i in range(prev_epoch, epochs):
-        # if i > 1:
-        #     ode_trained.turnOffRelax()
+    
+    #------------------------------------------------------------
+    # scheduler = [0.7249803359578534, 0.1937114844585008, 0.1937114844585008, 0.1937114844585008]
+    # optimizer_adam = torch.optim.LBFGS(ode_trained.parameters())
+    #------------------------------------------------------------
+    
+    for i in range(prev_epoch, epochs):    
+        # -----------------------------------------------------
+        if i > 1:
+            ode_trained.turnOffRelax()
         # obs_, obs_ext, ts_, ho_, _ = create_batch_latent_order(ETr, h_omegaT, N_Max, repeat=repeat)
         def closure(flag=True):
             optimizer_adam.zero_grad()
-            x_p, z, z_mean, z_log_var = ode_trained(input_d, ts_.to(device))
-            kl_loss = -0.5 * torch.sum( 1 + z_log_var - z_mean ** 2 - torch.exp(z_log_var), -1)
-            error_loss = 0.5*(((input_d[:9,:,:]- x_p[:9,:,:])**2)).sum(-1).sum(0) / noise_std ** 2
-
-            ts_del = (ts_[10:,:,:]- ts_[9:-1,:,:]).to(device)
-            error_grad = torch.sqrt(weights*torch.sum( torch.sum( ( (x_p[10:,:,:]- x_p[9:-1,:,:])/ts_del )**2, axis = 2) , axis = 1) )
-            error_grad = torch.sum(error_grad)
-            ##  calculate the cdistance for the last five
+            #-----------------------------------------------------
+            # Typical MSE and KL divergence loss function
+            x_p, _, _, _ = ode_trained(input_d, ts_.to(device))
+            # print(x_p.shape, input_d.shape)
+            # kl_loss = -0.5 * torch.sum( 1 + z_log_var - z_mean ** 2 - torch.exp(z_log_var), -1)
+            ts_del = (ts_[1:N_Max_points+1,:,:]- ts_[0,:,:]).to(device)
+            # print( ts_del.shape, (input_d[:N_Max_points,:,:]- x_p[:N_Max_points,:,:]).shape )
+            # print(ts_del)
+            error = ((input_d[:N_Max_points,:,0]- x_p[:N_Max_points,:,0]))        
+            error_loss = 0.5*(error**2).sum(-1).sum(0) / noise_std ** 2
+            
+            #-----------------------------------------------------------------
+            # Go to the same point constraints
             dist_mat = []
-            num_= 4
-            for j in range(1,num_+1):
-                # print(x_p.shape)
-                # print("j is", j)
-                vect = x_p[-(j+1), :, 0]
-
-                # print("shape before squeeze", vect.shape)
-                vect = vect.unsqueeze(dim =1)
-                # print("shape after squeeze",vect.shape)
-                dist__max = torch.cdist(vect, vect)
-                # print(dist__max.shape)
-                dist_mat.append(torch.linalg.norm(dist__max) )
-            distance = torch.sum(torch.tensor(dist_mat).to(device))
-
-
-            loss = torch.mean(error_loss+distance+scheduler*kl_loss)
-
+            # print("The model output shape is", x_p.shape)
+            start = N_max_constraints
+            vect_min = torch.max( torch.abs(x_p[start:,:, 0]), dim = 1).values
+            for j in range(x_p.shape[1]):
+                dist__max = ( vect_min-torch.abs(x_p[start:,j, 0]) )
+                dist_mat.append(torch.linalg.norm(dist__max))   
+            # ts_[int(N_max_constraints):n_points,0,0].to(device)*                   
+            distance = torch.sum(torch.tensor(dist_mat).to(device))            
+            
+            #-----------------------------------------------------
+            # # Flattening constraints
+            start = N_Max_points
+            ts_del = (ts_[start:,:,:]- ts_[ (start-1):-1,:,:]).to(device)
+            error_grad = (ts_[(start-1):-1,0,0]/10).to(device)*torch.sqrt( torch.sum(\
+                        torch.sum( ( (x_p[start:,:,:]- x_p[(start-1):-1,:,:])/ts_del )**2,\
+                        axis = 2) , axis = 1) )
+   
+            #---------------------------------------------------------------------------
+            # Total Loss function
+            loss = scheduler[0]*error_loss\
+                +scheduler[2]*torch.sum(distance)\
+                +scheduler[3]*torch.sum(error_grad)
+            
             if flag:
                 loss.backward()
                 return loss
             else:
-                return loss, error_loss, distance, error_grad, kl_loss
-        
+                return loss, error_loss, distance, error_grad
+            
+            
         optimizer_adam.step(closure)
         if i % save_iter == 0 or i == epochs:
+            
+            # The schedules
+            scheduler[0]= (scheduler[0]*(0.99))
+            scheduler[1]= (scheduler[1]*(0.98))
+            scheduler[2]= (scheduler[2]*(0.98))
+            scheduler[3]= (scheduler[3]*(0.98))
+            
+
             end_time = time.time()
             # Evaluation of the various terms in the loss function
-            loss, error_loss, distance, error_grad, kl_loss = closure(flag=False)
-        
-            print(f"(Save)({(end_time-begin_time):.2f}s) Epoch: {i} Total Loss: {str(loss.item())} with error {str(torch.mean(error_loss).item())} with grad {str     (torch.sum(error_grad).item())}   KL divergence {str(torch.mean(kl_loss).item())} with distance {str(torch.sum(distance).item())}", flush=True)
+            loss, error_loss, distance, error_grad = closure(flag=False)    
+            print(f"(Save)({(end_time-begin_time):.2f}s) Epoch: {i} Total Loss: {str(loss.item())} with error {str(torch.mean(error_loss).item())}   KL divergence {str(torch.mean(error_loss).item())} with distance {str(torch.sum(distance).item())} with ( {str(scheduler)})   with grad {str     (torch.sum(error_grad).item())} ", flush=True)
             begin_time = time.time()
-            torch.save(
-                {
-                    "step": i,
-                    "model_state_dict": ode_trained.state_dict(),
-                    "optimizer_state_dict": optimizer_adam.state_dict(),
-                    "loss": loss,
-                },
-                save_path,
-            )   
             
-            if scheduler >1e-9:
-                scheduler = scheduler*0.1
-            else:
-                scheduler = scheduler/(i+1)
+            if torch.isnan(loss) is not True or error_loss<1:
+                torch.save(
+                    {
+                        "step": i,
+                        "model_state_dict": ode_trained.state_dict(),
+                        "optimizer_state_dict": optimizer_adam.state_dict(),
+                        "loss": loss,
+                    },
+                    save_path,
+                )   
+                
+                
                 
             samp_trajs_p = to_np(
                 ode_trained.generate_with_seed(input_d, ts_.to(device))
@@ -170,69 +195,69 @@ def conduct_experiment_latent(
             
             # print(samp_trajs_p.shape)
             if plot_progress:
-                plt.figure()
-                fig, axes = plt.subplots(
-                    nrows=3,
-                    ncols=6,
-                    facecolor="white",
-                    figsize=(9, 9),
-                    gridspec_kw={"wspace": 0.5, "hspace": 0.5},
-                    dpi=100,
-                )
-                axes = axes.flatten()
-                for j, ax in enumerate(axes):
-                    ax.scatter(
-                        scale*N_Max,
-                        to_np(obs_[:, j]),
-                        6,
-                        label="real",
-                        marker="*",
-                        c=obs_[:, j].cpu().numpy(),
-                        cmap=cm.viridis,
-                    )
-                    ax.scatter(
-                        scale * ts_[:, j, 0],
-                        samp_trajs_p[:, j, 0],
-                        3,
-                        label="predicted",
-                        marker="+",
-                        c=samp_trajs_p[:, j, 0],
-                        cmap=cm.plasma,
-                    )
-                    ax.grid("True")
-                    ax.set_xlabel(
-                        "NMax, \n h$\\Omega$ ="
-                        + str(np.round(ho_[0, j, 0].item() * 50, 2)),
-                        fontsize=10,
-                    )
-                    if j == 5:
-                        ax.legend(bbox_to_anchor=(1.05, 1.0), loc="upper left")
-                    if j == 0 or j == 6 or j == 12:
-                        ax.set_ylabel("Ground state Energy", fontsize=10)
-                    
-                    ax.set_ylim([-32.3, -20])
-                    ax.set_xlim(0,40)
-                # plt.text(
-                #     20,
-                #     0,
-                #     "\n Total loss: "
-                #     + str(np.round(loss.item(), 2))
-                #     + "\n with error: "
-                #     + str(np.round(torch.mean(error_loss).item(), 2))
-                #     + " \n KL divergence: "
-                #     + str(np.round(torch.mean(kl_loss).item(), 2)) + " \n grad: "
-                #     + str(np.round(torch.mean(error_grad).item(), 2)),
+                # plt.figure()
+                # fig, axes = plt.subplots(
+                #     nrows=3,
+                #     ncols=6,
+                #     facecolor="white",
+                #     figsize=(9, 9),
+                #     gridspec_kw={"wspace": 0.5, "hspace": 0.5},
+                #     dpi=100,
                 # )
-                fig_path ="Figures/"
-                pathlib.Path(fig_path).mkdir(parents=True, exist_ok=True)
-                plt.savefig("Figures/reconstruction_"+str(i)+str(device)+".png",
-                    dpi=100,
-                    bbox_inches="tight",
-                )
-                plt.close()
+                # axes = axes.flatten()
+                # for j, ax in enumerate(axes):
+                #     ax.scatter(
+                #         scale*N_Max,
+                #         to_np(obs_[:, j]),
+                #         label="real",
+                #         marker="*",
+                #         c=obs_[:, j].cpu().numpy(),
+                #         cmap=cm.viridis,
+                #     )
+                #     # ax.scatter(
+                #     #     scale * ts_[:, j, 0],
+                #     #     samp_trajs_p[:, j, 0],
+                #     #     markersize=8,
+                #     #     label="predicted",
+                #     #     marker="+",
+                #     #     c=samp_trajs_p[:, j, 0],
+                #     #     cmap=cm.plasma,
+                #     # )
+                #     ax.plot(scale * ts_[:, j, 0],
+                #     samp_trajs_p[:, j, 0], linestyle='--', color='dodgerblue')
+                #     ax.grid("True")
+                #     ax.set_xlabel(
+                #         "NMax, \n h$\\Omega$ ="
+                #         + str(np.round(ho_[0, j, 0].item() * 50, 2)),
+                #         fontsize=10,
+                #     )
+                #     if j == 5:
+                #         ax.legend(bbox_to_anchor=(1.05, 1.0), loc="upper left")
+                #     if j == 0 or j == 6 or j == 12:
+                #         ax.set_ylabel("Ground state Energy", fontsize=10)
+                    
+                #     ax.set_ylim([-32.3, -20])
+                #     ax.set_xlim(0,40)
+                # # plt.text(
+                # #     -30,
+                # #     0,
+                # #     "\n Total loss: "
+                # #     + str(np.round(loss.item(), 2))
+                # #     + "\n with error: "
+                # #     + str(np.round(torch.mean(error_loss).item(), 2))
+                # #     + " \n KL divergence: "
+                # #     + str(np.round(torch.mean(kl_loss).item(), 2)) + " \n grad: "
+                # #     + str(np.round(torch.mean(error_grad).item(), 2)),
+                # # )
+                # fig_path ="Figures/"
+                # pathlib.Path(fig_path).mkdir(parents=True, exist_ok=True)
+                # plt.savefig("Figures/reconstruction_"+str(i)+str(device)+".png",
+                #     dpi=1000,
+                #     bbox_inches="tight",
+                # )
+                # plt.close()
 
-                
-                
+
                 #---------------------------------------------------------------------
                 plt.figure()
                 fig, ax = plt.subplots(
@@ -243,41 +268,40 @@ def conduct_experiment_latent(
                     gridspec_kw={"wspace": 0.5, "hspace": 0.5},
                     dpi=100,
                 )
-                axes = axes.flatten()
+                #ax = ax.flatten()
                 for j in range(ts_.shape[1]):
-                    # ax.scatter(
-                    #     scale* to_np(ts_[:, j, 0]),
-                    #     to_np(input_d[:, j, 0]),
-                    #     6,
-                    #     label="real",
-                    #     marker="o",
-                    #     c=input_d[:, j, 0].cpu().numpy(),
-                    #     cmap=cm.viridis,
-                    # )
                     ax.scatter(
-                        scale * ts_[:, j, 0],
-                        samp_trajs_p[:, j, 0],
-                        3,
-                        label="predicted",
-                        marker="*",
-                        c=samp_trajs_p[:, j, 0],
-                        cmap=cm.plasma,
+                        scale* to_np(ts_[:N_Max_points, j, 0]),
+                        to_np(input_d[:N_Max_points, j, 0]),
+                        20,
+                        marker="+",
+                        c=colors[j]
                     )
-                
+                    ax.plot(
+                        scale* to_np(ts_[:N_Max_points, j, 0]),
+                        to_np(input_d[:N_Max_points, j, 0]), linestyle='--', c = colors[j])
+                    # ax.scatter(
+                    #     scale * ts_[:, j, 0],
+                    #     samp_trajs_p[:, j, 0],
+                    #     3,
+                    #     label="predicted",
+                    #     marker="*",
+                    #     c=samp_trajs_p[:, j, 0],
+                    #     cmap=cm.plasma,
+                    # )
+                    ax.plot(scale * ts_[:, j, 0], samp_trajs_p[:, j, 0], label=str(h_omega[j]*50), c = colors[j])
+                    
                 ax.grid("True")
                 ax.set_xlabel( "NMax")
                 # if j == 5:
-                # ax.legend(bbox_to_anchor=(1.05, 1.0), loc="upper left")
+                ax.legend(bbox_to_anchor=(1.05, 1.0), loc="upper left")
                 # if j == 0 or j == 6 or j == 12:
                 ax.set_ylabel("Ground state Energy", fontsize=10)
-                # ax.set_ylim([-32.3, -20])
+                ax.set_ylim([-32.3, -30])
                 # ax.set_xlim(0,40)
                 fig_path ="Figures/"
                 pathlib.Path(fig_path).mkdir(parents=True, exist_ok=True)
-                plt.savefig("Figures/reconstructionall_"+str(i)+str(device)+".png",
-                    dpi=100,
-                    bbox_inches="tight",
-                )
+                plt.savefig("Figures/reconstructionall_.png",dpi=1000, bbox_inches="tight")
                 plt.close()
 
 
@@ -285,7 +309,7 @@ def conduct_experiment_latent(
 
 ########################################################################
 ## Plot the first one
-def plot_all(n_models, X, models_path, repeat):
+def plot_all(n_models, X, models_path, repeat, N_Max_points = 10, hbaromega_choose=5):
     traj_mean = []
     traj_var = []
     E = X[()]["data"][:, 1:]
@@ -315,13 +339,13 @@ def plot_all(n_models, X, models_path, repeat):
         dpi=100,
     )
     # ax = ax.flatten()
-    for j in range(ts_.shape[1]):
+    for j in range(hbaromega_choose):
         ax.scatter(
             N_Max,
             to_np(obs_[:, j]),
             6,
             label="real",
-            marker="o",
+            marker="+",
             c=obs_[:, j].cpu().numpy(),
             cmap=cm.viridis,
         )
@@ -333,16 +357,16 @@ def plot_all(n_models, X, models_path, repeat):
         #     c=samp_trajs_p[:, j, 0],
         #     cmap=cm.plasma,
         # )
-        ax.errorbar(scale * ts_[:, j, 0], mu[:,j], yerr=np.sqrt(var[:,j]), ecolor='tab:blue',fmt='-',elinewidth=0.6, barsabove=True)
+        ax.errorbar(scale * ts_[:, j, 0], mu[:,j], yerr=np.sqrt(var[:,j]), label=str(h_omega[j]*50), ecolor='tab:blue',fmt='-',elinewidth=0.6, barsabove=True)
         
     ax.grid("True")
     ax.set_xlabel( "NMax")
     # if j == 5:
-    # ax.legend(bbox_to_anchor=(1.05, 1.0), loc="upper left")
+    ax.legend(bbox_to_anchor=(1.05, 1.0), loc="upper right")
     # if j == 0 or j == 6 or j == 12:
     ax.set_ylabel("Ground state Energy", fontsize=10)
-    # ax.set_ylim([-32.3, -20])
-    # ax.set_xlim(0,40)
+    ax.set_ylim([-32.3, -31.00])
+    ax.set_xlim(0,40)
     fig_path ="Figures/"
     pathlib.Path(fig_path).mkdir(parents=True, exist_ok=True)
     plt.savefig("Figures/reconstructionall_.png",
@@ -408,7 +432,7 @@ def plot_homega_average_(n_models, X, models_path, repeat):
     axes.set_xlabel("NMax", fontsize=10)
     axes.legend(bbox_to_anchor=(1.05, 1.0), loc="upper left")
     axes.set_ylabel("Ground state Energy", fontsize=10)
-    axes.set_ylim(-33.5, -20)
+    axes.set_ylim(-33, -31)
     axes.set_xlim(0,30)
     plt.title("Ground State Energy averaged w.r.t. $\\overline{h} \\Omega$")
     plt.savefig(
@@ -576,7 +600,7 @@ def plot_model_averaged_long_N_Max(n_models, X, models_path, repeat=4):
         if j % num_cols == 0:
             ax.set_ylabel("Ground state Energy", fontsize=10)
             ax.set_title("Ground State Energy averaged  w.r.t. models")
-        ax.set_ylim(-32.3, -20)
+        ax.set_ylim(-32.25, -31.55)
         ax.set_xlim(0,50)
         ax.get_legend_handles_labels()
     handles, labels = plt.gca().get_legend_handles_labels()
@@ -595,12 +619,11 @@ def plot_model_averaged_long_N_Max(n_models, X, models_path, repeat=4):
 def load_checkpoint(path, device="cpu"):
     step = 0
     loss = 0
-    model = ODEVAE(2,  512, 10)
+    model = ODEVAE(2, 128, 2)
     model.to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
-    # optimizer = optim.QHAdam(model.parameters(), lr=1e-04)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+    # optimizer = optim.QHAdam(model.parameters(), lr=1e-3)
     print("Initialized without checkpointing")
-    
     if os.path.exists(path):
         print("load from checkpoint")
         checkpoint = torch.load(path,  map_location=device)
@@ -618,9 +641,6 @@ def load_checkpoint(path, device="cpu"):
                 },
                 path,
             )   
-            
-            
-    
         
     return step, model, optimizer, loss
 
@@ -741,8 +761,7 @@ if __name__ == "__main__":
 
     odes = []
     model_paths = []
-    n_models__ = [0,1]
-
+    n_models__ = [2]
     mp.set_start_method("spawn")
     if args.command == 'list':
         for i in n_models__:
@@ -761,8 +780,6 @@ if __name__ == "__main__":
             odes.append(checkpoint)
             device_list.append(devices[i % num_devices])
             
-        
-                
         stuff = zip(range(len(odes)), odes, device_list, model_paths, itertools.repeat(args.epochs), itertools.repeat(args.save))
         with mp.Pool(num_processes) as pool:
             pool.map(train_model, stuff)
