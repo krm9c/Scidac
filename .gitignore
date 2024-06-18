@@ -82,6 +82,9 @@ instance/
 # Sphinx documentation
 docs/_build/
 
+# Spack stuff
+.spack-env
+
 # PyBuilder
 target/
 
@@ -138,3 +141,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# vscode
+.vscode
