@@ -3,15 +3,18 @@ from torch import Tensor
 from torch import nn
 import sys
 import numpy as np
-from odesolver import ForwardEuler, RRK
+from odesolver import ForwardEuler, RRK, DiffEqSolver
 
 # ode_solver = ode_solver_relax = ForwardEuler(h_max=0.01)
+# ode_solver = ode_solver_relax = DiffEqSolver(h_max=0.1)
 # method = "FE"; h_max = 0.01
-method = "RK44"; h_max = 0.1
+method = "RK44"
+h_max = 0.1
 ode_solver = RRK(h_max=h_max, rkm=method, relaxation=False)
 ode_solver_relax = RRK(h_max=h_max, rkm=method, relaxation=True)
 
-#---------------------------------------
+
+# ---------------------------------------
 ## Let us now figure out how to get a model.
 class ODEF(nn.Module):
     def forward_with_grad(self, z, t, grad_outputs):
@@ -63,7 +66,9 @@ class ODEAdjoint(torch.autograd.Function):
                     try:
                         # If relaxation method fails (usually with a "time step too large" error)
                         # then we fall back to regular RK.
-                        z0 = ode_solver_relax.solve(z0, t[i_t, 0, :], t[i_t + 1, 0, :], func)
+                        z0 = ode_solver_relax.solve(
+                            z0, t[i_t, 0, :], t[i_t + 1, 0, :], func
+                        )
                     except:
                         ODEAdjoint.relax_failed = True
                         z0 = ode_solver.solve(z0, t[i_t, 0, :], t[i_t + 1, 0, :], func)
@@ -172,6 +177,7 @@ class ODEAdjoint(torch.autograd.Function):
                     aug_ans = ode_solver.solve(
                         aug_z, t_i[0, :], t[i_t - 1, 0, :], augmented_dynamics
                     )
+                # print(torch.norm(aug_ans))
 
                 # Unpack solved backwards augmented system
                 adj_z[:] = aug_ans[:, n_dim : 2 * n_dim]
@@ -208,7 +214,9 @@ class NeuralODE(nn.Module):
 
     def forward(self, z0, t=Tensor([0.0, 1.0]), return_whole_sequence=False):
         t = t.to(z0)
-        z = ODEAdjoint.apply(z0, t, self.func.flatten_parameters(), self.func, self.relax)
+        z = ODEAdjoint.apply(
+            z0, t, self.func.flatten_parameters(), self.func, self.relax
+        )
         if ODEAdjoint.relax_failed:
             self.turnOffRelax()
         if return_whole_sequence:
@@ -230,15 +238,15 @@ class NNODEF(ODEF):
         self.lin3 = nn.Linear(in_dim, in_dim)
         self.elu = nn.ReLU(inplace=True)
         self.ls = nn.LogSigmoid()
-        
+
     def forward(self, x, t):
         if not self.time_invariant:
             x = torch.cat((x, t.reshape([1, -1])), dim=-1)
         x = self.elu(self.lin1(x))
-        h = -1*self.ls(self.lin2(x))
-        return self.lin3(h)+h
-        
-        
+        h = -1 * self.ls(self.lin2(x))
+        return self.lin3(h) + h
+
+
 # class RNNEncoder(nn.Module):
 #     def __init__(self, input_dim, hidden_dim, latent_dim):
 #         super(RNNEncoder, self).__init__()
@@ -280,7 +288,7 @@ class NeuralODEDecoder(nn.Module):
         # print("decoder", z0.shape)
         xs = self.ode(z0, t, return_whole_sequence=True)
         # print(xs.shape)
-        
+
         # hs = self.l2h(zs)
         # xs = self.h2o(hs)
         return xs
@@ -292,7 +300,11 @@ class ODEVAE(nn.Module):
         self.output_dim = output_dim
         self.hidden_dim = hidden_dim
         self.latent_dim = latent_dim
-        print(output_dim, hidden_dim, output_dim)
+
+        print(
+            f"Model dimensions: output_dim = {output_dim}, hidden_dim = {hidden_dim}, latent_dim = {latent_dim}"
+        )
+
         # self.encoder = RNNEncoder(output_dim, hidden_dim, latent_dim)
         self.decoder = NeuralODEDecoder(output_dim, hidden_dim, output_dim)
 
@@ -309,16 +321,16 @@ class ODEVAE(nn.Module):
         # else:
         #     z = z_mean + torch.randn_like(z_mean) * torch.exp(0.5 * z_log_var)
         # print("going into decoder", x[0,:,:].shape)
-        x_p = self.decoder(x[0,:,:], t)
-        
+        x_p = self.decoder(x[0, :, :], t)
+
         return x_p, x, x, x
 
     def infer(self, seed_x, t):
-        self.turnOffRelax() # no relaxation when inferring
+        self.turnOffRelax()  # no relaxation when inferring
         return self.generate_with_seed(seed_x, t)
 
     def generate_with_seed(self, seed_x, t):
         # seed_t_len = seed_x.shape[0]
         # z_mean, _= self.encoder(seed_x, t[:seed_t_len])
-        x_p = self.decoder(seed_x[0,:,:], t)
+        x_p = self.decoder(seed_x[0, :, :], t)
         return x_p

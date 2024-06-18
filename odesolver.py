@@ -1,9 +1,8 @@
 from abc import ABC, abstractmethod
 import math
 import torch
-import numpy as np
 from nodepy import rk
-from scipy.optimize import root, fsolve, newton, brentq, bisect
+from torchdiffeq import odeint
 
 
 class ODESolver(ABC):
@@ -27,9 +26,9 @@ class ForwardEuler(ODESolver):
         if self.store_sol:
             tt = [t.detach().clone()]
             # zz = torch.zeros([len(z0), n_steps + 1]).to(device)
-            zz = torch.zeros(
-                [*z0.shape, int(abs(tf - t) / abs(dt) * 2.5) + 10000]
-            ).to(device)
+            zz = torch.zeros([*z0.shape, int(abs(tf - t) / abs(dt) * 2.5) + 10000]).to(
+                device
+            )
             zz[:, 0] = z.detach().clone()
         for ii in range(n_steps):
             z = z + dt * f(z, t)
@@ -94,11 +93,11 @@ class RRK(ODESolver):
             Copyright (c) 2019 David I. Ketcheson and Hendrik Ranocha.
 
         Modified by Cody Balos.
-            
+
         Relaxation Runge-Kutta method implementation.
-        
+
         Options:
-        
+
             rkm: Base Runge-Kutta method, in Nodepy format
             dt: time step size
             f: RHS of ODE system
@@ -109,7 +108,7 @@ class RRK(ODESolver):
             rescale_step: if True, new time step is t_n + \gamma dt
             debug: output some additional diagnostics
             gammatol: Fail if abs(1-gamma) exceeds this value
-            
+
         """
         device = z0.device
         t = t0.detach().clone()
@@ -117,9 +116,9 @@ class RRK(ODESolver):
         if store_sol:
             # We pre-allocate extra space because if rescale_step==True then
             # we don't know exactly how many steps we will take.
-            zz = torch.zeros(
-                [*z0.shape, int(abs(tf - t) / abs(dt) * 2.5) + 10000]
-            ).to(device)
+            zz = torch.zeros([*z0.shape, int(abs(tf - t) / abs(dt) * 2.5) + 10000]).to(
+                device
+            )
             zz[:, 0] = z.detach().clone()
             tt = [t.detach().clone()]
         ii = 0
@@ -162,7 +161,7 @@ class RRK(ODESolver):
 
             if print_gamma:
                 print(gam)
-            
+
             # TODO(CJB): when it is standard RK, shouldn't this be disabled?
             if torch.abs(gam - torch.tensor([1.0]).to(device)) > gammatol:
                 print(gam)
@@ -192,3 +191,25 @@ class RRK(ODESolver):
             return torch.cat(tt), zz[:, : ii + 1]
         else:
             return z
+
+
+class DiffEqSolver(ODESolver):
+    def __init__(self, h_max, store_sol=False, rtol=1e-6, atol=1e-8):
+        self.h_max = h_max
+        self.store_sol = store_sol
+        self.rtol = rtol
+        self.atol = atol
+
+    def solve(self, z0, t0, tf, f):
+        if self.store_sol:
+            if tf > t0:
+                t = torch.arange(t0[0], tf[0] + self.h_max / 2, self.h_max)
+            else:
+                t = torch.arange(t0[0], tf[0] + self.h_max / 2, -self.h_max)
+        else:
+            t = torch.tensor([tf])
+        sol = odeint(lambda t, y: f(y, t), z0, t, rtol=self.rtol, atol=self.atol)
+        if self.store_sol:
+            return t, sol.T
+        else:
+            return sol.squeeze()

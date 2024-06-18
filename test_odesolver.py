@@ -1,8 +1,8 @@
+from odesolver import ForwardEuler, RRK, DiffEqSolver
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from nodepy import rk
-from odesolver import ForwardEuler, RRK
+
 
 # Harmonic Oscillator with Quartic Entropy/Energy
 class HarmonicOscillator:
@@ -37,7 +37,7 @@ class HarmonicOscillator:
 print(" \n-- Solving forward --\n ")
 
 
-TEND = 1000.0
+TEND = 1.0
 
 u0 = torch.tensor([1.0, 0.0])
 dt = 0.1
@@ -47,7 +47,8 @@ tf = torch.tensor([TEND])
 fe = "FE"
 trap = "SSP22"
 rk4 = "RK44"
-ode_solver = RRK(h_max=dt, rkm=rk4, relaxation=True, rescale_step=True, store_sol=True)
+# ode_solver = RRK(h_max=dt, rkm=rk4, relaxation=True, rescale_step=True, store_sol=True)
+ode_solver = DiffEqSolver(h_max=dt, store_sol=True)
 
 tt, uu = ode_solver.solve(u0, t0, tf, HarmonicOscillator.f)
 
@@ -59,6 +60,7 @@ tt, uu = ode_solver.solve(u0, t0, tf, HarmonicOscillator.f)
 
 print("u(t_0) = ", uu[:, 0])
 print("u(t_f) = ", uu[:, -1])
+
 print(
     "Error at tf: %.3e"
     % np.linalg.norm(uu[:, -1] - HarmonicOscillator.u_analytical(tt[-1]))
