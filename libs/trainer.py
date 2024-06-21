@@ -156,7 +156,7 @@ class Trainer(eqx.Module):
             
             
             if step %print_iter == 0:
-                print(x.shape, t.shape, x0.shape)
+                # print(x.shape, t.shape, x0.shape)
                 plt.figure()
                 [ plt.plot(t[0:9], x[i,:,0], linestyle='-', c=colors[i]) for i in range(x.shape[0])]
                 [ plt.plot(t, yhat[i,:, 0], linestyle='--',c=colors[i]) for i in range(x.shape[0])]

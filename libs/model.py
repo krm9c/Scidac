@@ -9,7 +9,7 @@ import jax.nn as jnn
 import numpy as np_
 from jax import lax
 import diffrax
-from lib.utils import sp_matmul
+from libs.utils import sp_matmul
 import equinox as eqx
 ## Train now a CNN and test the trainer and then, the older model
 
