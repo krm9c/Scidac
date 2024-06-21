@@ -240,13 +240,12 @@ if __name__ == "__main__":
     N_Max_points      = 9
     SEED=5678
     N_max_constraints = 20
-    hbaromega_choose  = 13
+    hbaromega_choose  =5
     repeat=5
 
     #-----------------------------------------------------------
     # Get data
     ts_, x, scale_gs, scale_ho, scale_Nmax=return_data( hbaromega_choose)
-
     if args.command == "list":
         model_path = "models/MLP__Extrapolation_vdist"+str(hbaromega_choose)+".eqx"
         trainer, model = load_checkpoint(model_path, device="cpu")    
