@@ -22,9 +22,9 @@ import optax
 
 #-------------------------------------------------------
 ## Regular Linear layer in equinox
-from lib.model import *
-from lib.utils import *
-from lib.trainer import *
+from libs.model import *
+from libs.utils import *
+from libs.trainer import *
 
 
 def return_data( hbaromega_choose):    
@@ -36,7 +36,6 @@ def return_data( hbaromega_choose):
     ts_ = np.vstack(ts_).astype(np.float32).reshape([-1, 1])
 
     print("X", ETr.shape, "N_Max", ts_.shape, "hbarOmega", h_omega.shape)
-
     #--------------------------------------------
     # Normalizing factors
     scale_gs = -32.5
@@ -267,14 +266,14 @@ if __name__ == "__main__":
         trainer, model = load_checkpoint(model_path, device="cpu")   
         #---------------------------------------------------------------
         # If training
-        trainer, model = main(ts_, x, trainer, model, itrations=400,\
-            prints=100, factor=1e-04, init_step=10)
+        trainer, model = main(ts_, x, trainer, model, itrations=args.epochs,\
+            prints=args.save, factor=1e-04, init_step=10)
         
         #----------------------------------------------------------------
         # Save the model
         eqx.tree_serialise_leaves("models/MLP__Extrapolation_vdist"+str(hbaromega_choose)+".eqx", model)
         
-        
+    
     elif args.command == "plot":
         model_path = "models/MLP__Extrapolation_vdist"+str(hbaromega_choose)+".eqx"
         trainer, model = load_checkpoint(model_path, device="cpu")   
