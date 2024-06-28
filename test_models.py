@@ -58,7 +58,7 @@ def return_data(hbaromega_choose):
     return ts_, x, scale_gs, scale_ho, scale_Nmax
 
 
-def main(ts_, x, trainer, model, itrations, prints, factor, init_step):
+def main(ts_, x, trainer, model, model_path, iterations, factor, init_step, save_iter=200, print_iter=200):
     params, static = eqx.partition(model, eqx.is_array)
     # -----------------------------------------------------------
     # initialize the loss function
@@ -75,8 +75,10 @@ def main(ts_, x, trainer, model, itrations, prints, factor, init_step):
         params,
         static,
         optim,
-        n_iter=itrations,
-        print_iter=prints,
+        model_path=model_path,
+        n_iter=iterations,
+        save_iter=save_iter,
+        print_iter=print_iter,
     )
     model = eqx.combine(params, static)
     return trainer, model
@@ -176,6 +178,7 @@ def generate_plot(filename, model, x):
     plt.grid(linestyle=":", linewidth=0.5)
     plt.legend()
     plt.savefig(filename, dpi=1000)
+    plt.close()
 
 
 ########################################################################################
@@ -191,6 +194,7 @@ def load_checkpoint(path, device="cpu"):
 
     # optimizer = optim.QHAdam(model.parameters(), lr=1e-3)
     if os.path.exists(path):
+        print(f"loaded model {path}")
         model = eqx.tree_deserialise_leaves(path, model)
     else:
         print("initialized model from scratch")
@@ -298,8 +302,10 @@ if __name__ == "__main__":
             x,
             trainer,
             model,
-            itrations=args.epochs,
-            prints=args.save,
+            model_path,
+            iterations=args.epochs,
+            save_iter=args.save,
+            print_iter=args.save,
             factor=1e-04,
             init_step=10,
         )
@@ -307,7 +313,7 @@ if __name__ == "__main__":
         # ----------------------------------------------------------------
         # Save the model
         eqx.tree_serialise_leaves(
-            "models/MLP__Extrapolation_vdist" + str(hbaromega_choose) + ".eqx", model
+            model_path, model
         )
 
     elif args.command == "plot":

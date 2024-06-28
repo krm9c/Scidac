@@ -129,7 +129,7 @@ class Trainer(eqx.Module):
     
     
     #-------------------------------------------------------------
-    def train__EUC__(self, trainloader, params, static, optim, n_iter=1000, print_iter=200):
+    def train__EUC__(self, trainloader, params, static, optim, model_path, n_iter=1000, save_iter=200, print_iter=200):
         from tqdm import tqdm 
         t, x, init_step, N_max_constraints, dist_flag = trainloader
         x= x.astype(np_.float32)
@@ -153,9 +153,14 @@ class Trainer(eqx.Module):
                 static=static, batch= batch)
             (error, dist, error_grad, yhat) = opt_state.aux
             pbar.set_postfix({ "MSE:": error, "Distance Loss": dist, "gradient": error_grad} )
-            
-            
-            if step %print_iter == 0:
+
+            if step % save_iter == 0:
+                model = eqx.combine(params, static)
+                eqx.tree_serialise_leaves(
+                    model_path, model
+                )
+
+            if step % print_iter == 0:
                 # print(x.shape, t.shape, x0.shape)
                 plt.figure()
                 [ plt.plot(t[0:9], x[i,:,0], linestyle='-', c=colors[i]) for i in range(x.shape[0])]
@@ -167,6 +172,7 @@ class Trainer(eqx.Module):
                 plt.ylabel('E (Ground State)')
                 plt.grid(linestyle=':', linewidth=0.5)
                 plt.savefig("Figures/plot"+str(step)+".png", dpi=500)
+                plt.close()
                 
         return params
     
