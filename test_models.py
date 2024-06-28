@@ -58,7 +58,18 @@ def return_data(hbaromega_choose):
     return ts_, x, scale_gs, scale_ho, scale_Nmax
 
 
-def main(ts_, x, trainer, model, model_path, iterations, factor, init_step, save_iter=200, print_iter=200):
+def main(
+    ts_,
+    x,
+    trainer,
+    model,
+    model_path,
+    iterations,
+    factor,
+    init_step,
+    save_iter=200,
+    print_iter=200,
+):
     params, static = eqx.partition(model, eqx.is_array)
     # -----------------------------------------------------------
     # initialize the loss function
@@ -312,9 +323,7 @@ if __name__ == "__main__":
 
         # ----------------------------------------------------------------
         # Save the model
-        eqx.tree_serialise_leaves(
-            model_path, model
-        )
+        eqx.tree_serialise_leaves(model_path, model)
 
     elif args.command == "plot":
         model_path = "models/MLP__Extrapolation_vdist" + str(hbaromega_choose) + ".eqx"
