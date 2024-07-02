@@ -210,6 +210,7 @@ def load_checkpoint(path, device="cpu"):
     else:
         print("initialized model from scratch")
         eqx.tree_serialise_leaves(path, model)
+
     return trainer, model
 
 
@@ -285,10 +286,12 @@ if __name__ == "__main__":
     # Get data
     ts_, x, scale_gs, scale_ho, scale_Nmax = return_data(hbaromega_choose)
 
-    model_path = f"models/MLP__Extrapolation_vdist{hbaromega_choose}_{args.model_num}.eqx"
+    model_path = (
+        f"models/MLP__Extrapolation_vdist{hbaromega_choose}_{args.model_num}.eqx"
+    )
 
     if args.command == "list":
-       
+
         trainer, model = load_checkpoint(model_path, device="cpu")
         x = x.astype(jnp.float32)
         x0 = x[:, 0, :]
