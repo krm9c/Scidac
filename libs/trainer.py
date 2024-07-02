@@ -215,7 +215,7 @@ class Trainer(eqx.Module):
                 plt.xlabel("NMax")
                 plt.ylabel("E (Ground State)")
                 plt.grid(linestyle=":", linewidth=0.5)
-                plt.savefig("Figures/plot" + str(step) + ".png", dpi=500)
+                plt.savefig("Figures/training/plot" + str(step) + ".png", dpi=500)
                 plt.close()
 
         return params

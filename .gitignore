@@ -3,9 +3,10 @@
 *.output
 nuclear-extrapolation*
 extrapolation-output/
-Figures/training
-Figures_old/
+Figures/training/*
+!Figures/training/.gitkeep
 models/
+runs/
 # JSRUN output
 *.out
 
@@ -123,6 +124,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.py-env
 
 # Spyder project settings
 .spyderproject

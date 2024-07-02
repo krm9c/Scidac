@@ -235,10 +235,10 @@ if __name__ == "__main__":
         help="number of processes to use (default is to auto detect)",
     )
     parser.add_argument(
-        "-n",
-        "--num-models",
-        default=2,
-        help="number of models in the ensemble",
+        "-m",
+        "--model-num",
+        default=0,
+        help="which model",
     )
 
     train_parser = subparsers.add_parser("train")
@@ -263,7 +263,7 @@ if __name__ == "__main__":
     )
     train_parser.add_argument("models_path", help="directory where models are stored")
     train_parser.add_argument(
-        "-s", "--save", default=10, type=int, help="frequency of save"
+        "-s", "--save", default=200, type=int, help="frequency of save"
     )
     train_parser.add_argument(
         "-e", "--epochs", default=25000, type=int, help="number of epochs to train for"
@@ -284,8 +284,11 @@ if __name__ == "__main__":
     # -----------------------------------------------------------
     # Get data
     ts_, x, scale_gs, scale_ho, scale_Nmax = return_data(hbaromega_choose)
+
+    model_path = f"models/MLP__Extrapolation_vdist{hbaromega_choose}_{args.model_num}.eqx"
+
     if args.command == "list":
-        model_path = "models/MLP__Extrapolation_vdist" + str(hbaromega_choose) + ".eqx"
+       
         trainer, model = load_checkpoint(model_path, device="cpu")
         x = x.astype(jnp.float32)
         x0 = x[:, 0, :]
@@ -304,7 +307,6 @@ if __name__ == "__main__":
         )
 
     elif args.command == "train":
-        model_path = "models/MLP__Extrapolation_vdist" + str(hbaromega_choose) + ".eqx"
         trainer, model = load_checkpoint(model_path, device="cpu")
         # ---------------------------------------------------------------
         # If training
@@ -326,7 +328,6 @@ if __name__ == "__main__":
         eqx.tree_serialise_leaves(model_path, model)
 
     elif args.command == "plot":
-        model_path = "models/MLP__Extrapolation_vdist" + str(hbaromega_choose) + ".eqx"
         trainer, model = load_checkpoint(model_path, device="cpu")
         # ---------------------------------------------------------------
         generate_plot("Figures/plot_" + str(hbaromega_choose) + ".png", model, x)
