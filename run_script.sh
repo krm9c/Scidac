@@ -29,7 +29,13 @@
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate jax__
 
-python test_models.py train models -e 10 -s 2
-python test_models.py list models
+# python test_models.py -m 0 train models -e 1000 -s 100
+# python test_models.py -m 1 train models -e 1000 -s 100 
+# python test_models.py -m 2 train models -e 1000 -s 100 
+# python test_models.py -m 3 train models -e 1000 -s 100 
+# python test_models.py list models
+
 python test_models.py plot models
+
+
 conda deactivate

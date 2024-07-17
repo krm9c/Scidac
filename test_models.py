@@ -23,13 +23,22 @@ from libs.utils import *
 from libs.trainer import *
 
 
-def return_data(hbaromega_choose):
+def return_data(hbaromega_choose, plot=False):
     X = np.load("data/processed_extrapolation.npy", allow_pickle=True)
-    ETr = X[()]["data"][:hbaromega_choose, 1:]
-    h_omega = X[()]["data"][:hbaromega_choose, 0]
-    N_Max = X[()]["Nmax"].reshape([-1])
-    ts_ = np.concatenate([N_Max + j * 18 for j in range(repeat + 1)], axis=0)
-    ts_ = np.vstack(ts_).astype(np.float32).reshape([-1, 1])
+    
+    if plot:
+        ETr = X[()]["data"][:, 1:]
+        h_omega = X[()]["data"][:, 0]
+        N_Max = X[()]["Nmax"].reshape([-1])
+        ts_ = np.concatenate([N_Max + j * 18 for j in range(repeat + 1)], axis=0)
+        ts_ = np.vstack(ts_).astype(np.float32).reshape([-1, 1])
+    else:
+        ETr = X[()]["data"][:hbaromega_choose, 1:]
+        h_omega = X[()]["data"][:hbaromega_choose, 0]
+        N_Max = X[()]["Nmax"].reshape([-1])
+        ts_ = np.concatenate([N_Max + j * 18 for j in range(repeat + 1)], axis=0)
+        ts_ = np.vstack(ts_).astype(np.float32).reshape([-1, 1])
+
 
     print("X", ETr.shape, "N_Max", ts_.shape, "hbarOmega", h_omega.shape)
     # --------------------------------------------
@@ -64,6 +73,7 @@ def main(
     trainer,
     model,
     model_path,
+    model_num,
     iterations,
     factor,
     init_step,
@@ -82,7 +92,7 @@ def main(
 
     # -----------------------------------------------------------
     params = trainer.train__EUC__(
-        (ts_, x, init_step, N_max_constraints, 1e-4),
+        (ts_, x, init_step, N_max_constraints, factor, model_num),
         params,
         static,
         optim,
@@ -97,11 +107,8 @@ def main(
 
 # ----------------------------------------------------------------
 # The plotting
-def generate_plot(filename, model, x):
-    x0 = x[:, 0, :]
-    t = ts_.reshape([-1])
-    xhat = jax.vmap(model, in_axes=(None, 0))(t, x0)
-
+def generate_plot(filename, model_name, model_list, x):
+    
     # -----------------------------------------------
     import seaborn as sns
 
@@ -118,12 +125,12 @@ def generate_plot(filename, model, x):
 
     COLOR = "darkslategray"
     params = {
-        "axes.titlesize": small,
-        "legend.fontsize": small,
+        "axes.titlesize":  med,
+        "legend.fontsize": med,
         "figure.figsize": (cm2inch(36), cm2inch(23.5)),
         "axes.labelsize": med,
-        "axes.titlesize": small,
-        "xtick.labelsize": small,
+        "axes.titlesize": large,
+        "xtick.labelsize": med,
         "lines.markersize": marker_size,
         "ytick.labelsize": large,
         "figure.titlesize": large,
@@ -161,35 +168,159 @@ def generate_plot(filename, model, x):
     plt.rcParams.update(params)
     plt.rc("text", usetex=False)
     plt.figure()
+    xhat=[]
+    for i,num in enumerate(model_list):
+        model_path = model_name+str(num)+".eqx"
+        _, model = load_checkpoint(model_path, device="cpu")
+        x0 = x[:, 0, :]
+        t = ts_.reshape([-1])
+        xhat.append(jax.vmap(model, in_axes=(None, 0))(t, x0))
+        
+        
+    xhat = jnp.array(xhat)
+    mean = jnp.mean(xhat, axis = 0)
+    var  = jnp.sqrt(jnp.std(xhat, axis = 0))
     [
         plt.plot(
             ts_[0:9, :] * scale_Nmax,
             x[i, :, 0] * scale_gs,
-            linestyle="-",
+            linestyle="--",
             c=colors[i],
-            label=x[i, 0, 1] * scale_ho,
+            label= str(   round(x[i, 0, 1]*scale_ho,1)  ),
         )
         for i in range(5)
     ]
     [
-        plt.plot(
+        plt.errorbar(
             ts_ * scale_Nmax,
-            xhat[i, :, 0] * scale_gs,
-            linestyle="--",
-            c=colors[i],
-            label=x[i, 0, 1] * scale_ho,
+            mean[i, :, 0] * scale_gs,
+            yerr=var[i,:,0],
+            barsabove=True,
+            ecolor=colors[i],
+            label= str( round(x[i, 0, 1]*scale_ho, 2) ),
         )
         for i in range(5)
     ]
-    # plt.plot(t, x1hat)
-    # plt.xlim([0,1])
-    plt.ylim([-31.8, -32.4])
+    
+    plt.title("--  True; -  Predicted;  | Uncertainty")
+    plt.ylim([-31, -32.3])
+    plt.xlim([0, 60])
     plt.xlabel("NMax")
     plt.ylabel("E (Ground State)")
     plt.grid(linestyle=":", linewidth=0.5)
-    plt.legend()
-    plt.savefig(filename, dpi=1000)
+    plt.legend(title="$\\bar{h}\Omega$",ncol=2, title_fontsize=large, loc='lower right', fancybox=True)
+    plt.savefig(filename, dpi=100)
     plt.close()
+
+# ----------------------------------------------------------------
+# The plotting
+def generate_plot_hbar_omega(filename, model_name, model_list, x):
+    
+    # -----------------------------------------------
+    import seaborn as sns
+
+    sns.color_palette("bright")
+    large = 20
+    med = 18
+    small = 16
+    marker_size = 1.01
+    lw = 0.1
+    inten = 0.4
+
+    def cm2inch(value):
+        return value / 2.54
+
+    COLOR = "darkslategray"
+    params = {
+        "axes.titlesize":  med,
+        "legend.fontsize": med,
+        "figure.figsize": (cm2inch(36), cm2inch(23.5)),
+        "axes.labelsize": med,
+        "axes.titlesize": large,
+        "xtick.labelsize": med,
+        "lines.markersize": marker_size,
+        "ytick.labelsize": large,
+        "figure.titlesize": large,
+        "text.color": COLOR,
+        "axes.labelcolor": COLOR,
+        "axes.linewidth": 0.5,
+        "xtick.color": COLOR,
+        "ytick.color": COLOR,
+    }
+    colors = [
+        "tab:blue",
+        "tab:orange",
+        "tab:green",
+        "tab:red",
+        "tab:purple",
+        "tab:brown",
+        "tab:pink",
+        "tab:cyan",
+        "dodgerblue",
+        "violet",
+        "orangered",
+        "maroon",
+        "darkorange",
+        "burlywood",
+        "greenyellow",
+        "tab:gray",
+        "black",
+        "rosybrown",
+        "lightseagreen",
+        "teal",
+        "aqua",
+        "darkolivegreen",
+    ]
+
+    plt.rcParams.update(params)
+    plt.rc("text", usetex=False)
+    plt.figure()
+    xhat=[]
+    for i,num in enumerate(model_list):
+        model_path = model_name+str(num)+".eqx"
+        _, model = load_checkpoint(model_path, device="cpu")
+        x0 = x[:, 0, :]
+        t = ts_.reshape([-1])
+        xhat.append(jax.vmap(model, in_axes=(None, 0))(t, x0))
+       
+    xhat = jnp.array(xhat)
+    print(xhat.shape) 
+    
+    mean = jnp.mean(xhat, axis = 0)
+    var  = jnp.sqrt(jnp.std(xhat, axis = 0))
+
+    [
+        plt.plot(
+            x[:, i, 1] * scale_ho,
+            x[:, i, 0] * scale_gs,
+            linestyle="--",
+            c=colors[i],
+            label= str(   ts_[i]*scale_Nmax  ),
+        )
+        for i in range(10)
+    ]
+    [
+        plt.errorbar(
+            x[:, i, 1] * scale_ho,
+            mean[:, i,  0] * scale_gs,
+            yerr=var[:,i, 0],
+            barsabove=True,
+            ecolor=colors[i],
+            label= str( ts_[i]*scale_Nmax ),
+        )
+        for i in range(10)
+    ]
+    
+    plt.title("--  True; -  Predicted;  | Uncertainty")
+    # plt.ylim([-31, -32.3])
+    plt.xlim([0, 68])
+    plt.xlabel("$\\bar{h}\Omega$ (MeV)" )
+    plt.ylabel("E (Ground State)")
+    plt.grid(linestyle=":", linewidth=0.5)
+    plt.legend(title="$NMax$",ncol=2, title_fontsize=large, loc='lower right', fancybox=True)
+    plt.savefig(filename, dpi=100)
+    plt.close()
+
 
 
 ########################################################################################
@@ -202,7 +333,6 @@ def load_checkpoint(path, device="cpu"):
     # -----------------------------------------------------------
     # Initialize the model and load weights from a stored model
     model = NeuralODE(data_size=2, width_size=128, depth=3, key=model_key)
-
     # optimizer = optim.QHAdam(model.parameters(), lr=1e-3)
     if os.path.exists(path):
         print(f"loaded model {path}")
@@ -210,7 +340,6 @@ def load_checkpoint(path, device="cpu"):
     else:
         print("initialized model from scratch")
         eqx.tree_serialise_leaves(path, model)
-
     return trainer, model
 
 
@@ -279,58 +408,79 @@ if __name__ == "__main__":
     N_Max_points = 9
     SEED = 5678
     N_max_constraints = 20
-    hbaromega_choose = 5
+    hbaromega_choose = 12
     repeat = 5
-
+    init_step=2
+    dist_flag=1e-02
+    list_models=[0,1,2,3]
+    
     # -----------------------------------------------------------
     # Get data
     ts_, x, scale_gs, scale_ho, scale_Nmax = return_data(hbaromega_choose)
-
     model_path = (
         f"models/MLP__Extrapolation_vdist{hbaromega_choose}_{args.model_num}.eqx"
     )
-
+    
+    # ----------------------------------------------------------------
     if args.command == "list":
-
         trainer, model = load_checkpoint(model_path, device="cpu")
         x = x.astype(jnp.float32)
         x0 = x[:, 0, :]
         t = ts_.reshape([-1])
         config = {
-            "int_step": 200,
+            "int_step": init_step,
             "N_Max_constraints": N_max_constraints,
-            "dist_flag": 1e-04,
+            "dist_flag": dist_flag,
             "step": 0,
         }
         batch = (t, x0, x, config)
-        params, static = eqx.partition(model, eqx.is_array)
+        loss_val = []
+        
+        for i,num in enumerate(list_models):
+            model_name=f"models/MLP__Extrapolation_vdist{hbaromega_choose}_{num}.eqx"
+            trainer, model = load_checkpoint(model_name, device="cpu")
+            params, static = eqx.partition(model, eqx.is_array)
+            loss_val.append( trainer.loss_fn_mse(params, static, batch, loss=True) )
+        
+        loss_val=jnp.array(loss_val)    
         print(
-            "The loss of the model is",
-            trainer.loss_fn_mse(params, static, batch, loss=True),
+            "The loss of the model is", jnp.mean(loss_val), jnp.sqrt(jnp.std(loss_val))
         )
 
+    # ----------------------------------------------------------------
     elif args.command == "train":
+        # ----------------------------------------------------------------
         trainer, model = load_checkpoint(model_path, device="cpu")
-        # ---------------------------------------------------------------
-        # If training
         trainer, model = main(
             ts_,
             x,
             trainer,
             model,
             model_path,
+            model_num=args.model_num,
             iterations=args.epochs,
             save_iter=args.save,
             print_iter=args.save,
-            factor=1e-04,
-            init_step=10,
+            factor=dist_flag,
+            init_step=init_step,
         )
-
+        
         # ----------------------------------------------------------------
         # Save the model
         eqx.tree_serialise_leaves(model_path, model)
-
+        
+        
+    # ----------------------------------------------------------------
     elif args.command == "plot":
-        trainer, model = load_checkpoint(model_path, device="cpu")
+        ts_, x, scale_gs, scale_ho, scale_Nmax = return_data(hbaromega_choose, plot=True)
+        model_path = (
+        f"models/MLP__Extrapolation_vdist{hbaromega_choose}_{args.model_num}.eqx"
+        )
         # ---------------------------------------------------------------
-        generate_plot("Figures/plot_" + str(hbaromega_choose) + ".png", model, x)
+        generate_plot(f"Figures/plot_hbaromega{hbaromega_choose}.pdf",\
+                    f"models/MLP__Extrapolation_vdist{hbaromega_choose}_",\
+                    list_models, x)
+
+        generate_plot_hbar_omega(f"Figures/plot_with_respect_hbaromega.pdf",\
+                    f"models/MLP__Extrapolation_vdist{hbaromega_choose}_",\
+                    list_models, x)
