@@ -4,10 +4,10 @@
 ############################################################
 ## THIS IS THE SCRIPT WITH NOISE AND THE VARIANCE CORRECTION.
 ############################################################
+# The following is for running on theta gpu
+export http_proxy=http://proxy.tmi.alcf.anl.gov:3128
+export https_proxy=http://proxy.tmi.alcf.anl.gov:3128
 
-## The following is for running on theta gpu
-# export http_proxy=http://proxy.tmi.alcf.anl.gov:3128
-# export https_proxy=http://proxy.tmi.alcf.anl.gov:3128
 
 # >>> conda initialize >>>
 # !! Contents within this block are managed by 'conda init' !!
@@ -25,16 +25,20 @@
 # # <<< conda initialize <<<
 # conda activate posei
 
+
+#-------------------------------------------------------
 ## The following is for running on JLSE
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate jax__
 
-# python test_models.py -m 0 train models -e 1000 -s 100
-# python test_models.py -m 1 train models -e 1000 -s 100 
-# python test_models.py -m 2 train models -e 1000 -s 100 
-# python test_models.py -m 3 train models -e 1000 -s 100 
-# python test_models.py list models
 
+python test_models.py -m 0 train models -e 5000 -s 200
+# python test_models.py -m 1 train models -e 1000 -s 200 
+# python test_models.py -m 2 train models -e 1000 -s 200 
+# python test_models.py -m 3 train models -e 1000 -s 200 
+
+
+python test_models.py list models
 python test_models.py plot models
 
 

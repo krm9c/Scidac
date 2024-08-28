@@ -108,7 +108,7 @@ def main(
 # ----------------------------------------------------------------
 # The plotting
 def generate_plot(filename, model_name, model_list, x):
-    
+    print("plotting="+filename)
     # -----------------------------------------------
     import seaborn as sns
 
@@ -127,7 +127,7 @@ def generate_plot(filename, model_name, model_list, x):
     params = {
         "axes.titlesize":  med,
         "legend.fontsize": med,
-        "figure.figsize": (cm2inch(36), cm2inch(23.5)),
+        "figure.figsize": (cm2inch(36), cm2inch(40)),
         "axes.labelsize": med,
         "axes.titlesize": large,
         "xtick.labelsize": med,
@@ -201,8 +201,8 @@ def generate_plot(filename, model_name, model_list, x):
         )
         for i in range(5)
     ]
-    
-    plt.title("--  True; -  Predicted;  | Uncertainty")
+    print(mean[i,:,0] * scale_gs, var[i,:,0])
+    plt.title("--  True; -  Predicted;  | Uncertainty | \n  $E^{\\infty}_{GS} = -32.012(013)~chi2 Mean(std) = 2.311 \\times 10^{-4}~(004)$ ")
     plt.ylim([-31, -32.3])
     plt.xlim([0, 60])
     plt.xlabel("NMax")
@@ -215,7 +215,7 @@ def generate_plot(filename, model_name, model_list, x):
 # ----------------------------------------------------------------
 # The plotting
 def generate_plot_hbar_omega(filename, model_name, model_list, x):
-    
+    print("plotting="+filename)
     # -----------------------------------------------
     import seaborn as sns
 
@@ -234,7 +234,7 @@ def generate_plot_hbar_omega(filename, model_name, model_list, x):
     params = {
         "axes.titlesize":  med,
         "legend.fontsize": med,
-        "figure.figsize": (cm2inch(36), cm2inch(23.5)),
+        "figure.figsize": (cm2inch(36), cm2inch(40)),
         "axes.labelsize": med,
         "axes.titlesize": large,
         "xtick.labelsize": med,
@@ -408,10 +408,10 @@ if __name__ == "__main__":
     N_Max_points = 9
     SEED = 5678
     N_max_constraints = 20
-    hbaromega_choose = 12
+    hbaromega_choose = 8
     repeat = 5
-    init_step=2
-    dist_flag=1e-02
+    init_step=3    
+    dist_flag=1e-01
     list_models=[0,1,2,3]
     
     # -----------------------------------------------------------
@@ -481,6 +481,6 @@ if __name__ == "__main__":
                     f"models/MLP__Extrapolation_vdist{hbaromega_choose}_",\
                     list_models, x)
 
-        generate_plot_hbar_omega(f"Figures/plot_with_respect_hbaromega.pdf",\
+        generate_plot_hbar_omega(f"Figures/plot_with_respect_hbaromega{hbaromega_choose}.pdf",\
                     f"models/MLP__Extrapolation_vdist{hbaromega_choose}_",\
                     list_models, x)

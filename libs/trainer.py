@@ -102,23 +102,24 @@ class Trainer(eqx.Module):
 
         # -----------------------------------------------------------------
         # Go to the same point constraints
-        start = N_max_constraints
+        start =  40 # (N_max_constraints+10)
         # print(init_step)
-
         # -----------------------------------------------------------------
         # print("prediction shape", xhat.shape)
-        vect_min = jnp.max(jnp.abs(xhat[:, start:, 0]))
-        dist = jnp.linalg.norm(t[start:] * (vect_min - xhat[:, start:, 0]))
-        error = jnp.mean((x - xhat[:, :9, :]) ** 2)
+        vect_min = jnp.argmax( jnp.abs(xhat[:, -1, 0]), axis = 0 )
+        dist = jnp.linalg.norm( t[start:] * (xhat[vect_min, start:, 0] - xhat[:, start:, 0]))+jnp.sum((1-xhat[vect_min, start:, 0])**2)
+        error = jnp.sum( (1/(0.5-t[:9])**2)*  jnp.sum( jnp.sum( (x - xhat[:, :9, :] )**2, axis =2) , axis=0) ) 
+                
         ts_del = t[start:] - t[(start - 1) : -1]
         error_grad = jnp.mean(
-            (t[(start - 1) : -1] / 10)
-            * jnp.sqrt(
-                jnp.sum(
-                    ((xhat[:, start:, 0] - xhat[:, (start - 1) : -1, 0]) / ts_del) ** 2
+            (
+                t[(start - 1) : -1])
+                * jnp.sqrt(
+                    jnp.sum(
+                        ((xhat[:, start:, 0] - xhat[:, (start - 1) : -1, 0]) / ts_del) ** 2
+                    )
                 )
             )
-        )
 
         if loss:
             if step > init_step:
@@ -159,7 +160,7 @@ class Trainer(eqx.Module):
     ):
         from tqdm import tqdm
 
-        t, x, init_step, N_max_constraints, dist_flag = trainloader
+        t, x, init_step, N_max_constraints, dist_flag, model_num = trainloader
         x = x.astype(np_.float32)
         x0 = x[:, 0, :]
         t = t.reshape([-1])
@@ -215,7 +216,7 @@ class Trainer(eqx.Module):
                 plt.xlabel("NMax")
                 plt.ylabel("E (Ground State)")
                 plt.grid(linestyle=":", linewidth=0.5)
-                plt.savefig("Figures/training/plot" + str(step) + ".png", dpi=500)
+                plt.savefig("Figures/training/plot_"+str(step)+"model_num"+str(model_num)+"_.png", dpi=500)
                 plt.close()
 
         return params
