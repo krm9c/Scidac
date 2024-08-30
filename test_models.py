@@ -9,6 +9,8 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import matplotlib.cm as cm
 import jax
+jax.config.update("jax_enable_x64", True)
+
 import jax.tree_util as tree
 import numpy as np
 import jax.numpy as jnp
@@ -31,13 +33,13 @@ def return_data(hbaromega_choose, plot=False):
         h_omega = X[()]["data"][:, 0]
         N_Max = X[()]["Nmax"].reshape([-1])
         ts_ = np.concatenate([N_Max + j * 18 for j in range(repeat + 1)], axis=0)
-        ts_ = np.vstack(ts_).astype(np.float32).reshape([-1, 1])
+        ts_ = np.vstack(ts_).reshape([-1, 1])
     else:
         ETr = X[()]["data"][:hbaromega_choose, 1:]
         h_omega = X[()]["data"][:hbaromega_choose, 0]
         N_Max = X[()]["Nmax"].reshape([-1])
         ts_ = np.concatenate([N_Max + j * 18 for j in range(repeat + 1)], axis=0)
-        ts_ = np.vstack(ts_).astype(np.float32).reshape([-1, 1])
+        ts_ = np.vstack(ts_).reshape([-1, 1])
 
 
     print("X", ETr.shape, "N_Max", ts_.shape, "hbarOmega", h_omega.shape)
@@ -52,7 +54,6 @@ def return_data(hbaromega_choose, plot=False):
     ts_ = ts_ / scale_Nmax
     x1 = ETr / scale_gs
     x2 = h_omega / scale_ho
-
     # --------------------------------------------
     # Reverse Normalization
     # print(np.max(x1), np.max(x2), scale_gs, scale_ho, scale_Nmax )
@@ -83,13 +84,28 @@ def main(
     params, static = eqx.partition(model, eqx.is_array)
     # -----------------------------------------------------------
     # initialize the loss function
-    func = trainer.return_loss_grad
     # -----------------------------------------------------------
-    ## initialize the optimizer
-    optim = OptaxSolver(
-        opt=optax.adamw(1e-04), fun=func, value_and_grad=True, has_aux=True, jit=False
-    )
-
+    # initialize the optimizer
+    # optim = OptaxSolver(
+    #     opt=optax.nadamw(1e-05),\
+    #     fun=trainer.return_loss_grad,\
+    #     value_and_grad=True,\
+    #     has_aux=True,\
+    #     jit=False
+    # )
+    
+    # import jaxopt
+    # optim = jaxopt.NonlinearCG(fun=trainer.return_loss_grad,
+    #     value_and_grad=True,\
+    #     has_aux=True,\
+    #     jit=False,\
+    #     unroll=False
+    #     # linesearch='backtracking',\
+    #     # linesearch_init='current',\
+    # )
+    optim = optax.adam(1e-04)
+    # t = np.linspace(0, max(ts_), 100)
+    # optim = optax.scale_by_lbfgs()
     # -----------------------------------------------------------
     params = trainer.train__EUC__(
         (ts_, x, init_step, N_max_constraints, factor, model_num),
@@ -111,7 +127,6 @@ def generate_plot(filename, model_name, model_list, x):
     print("plotting="+filename)
     # -----------------------------------------------
     import seaborn as sns
-
     sns.color_palette("bright")
     large = 20
     med = 18
@@ -188,7 +203,7 @@ def generate_plot(filename, model_name, model_list, x):
             c=colors[i],
             label= str(   round(x[i, 0, 1]*scale_ho,1)  ),
         )
-        for i in range(5)
+        for i in range(hbaromega_choose)
     ]
     [
         plt.errorbar(
@@ -199,14 +214,20 @@ def generate_plot(filename, model_name, model_list, x):
             ecolor=colors[i],
             label= str( round(x[i, 0, 1]*scale_ho, 2) ),
         )
-        for i in range(5)
+        for i in range(hbaromega_choose)
     ]
+    # print("scale_gs", scale_gs)
     print(mean[i,:,0] * scale_gs, var[i,:,0])
-    plt.title("--  True; -  Predicted;  | Uncertainty | \n  $E^{\\infty}_{GS} = -32.012(013)~chi2 Mean(std) = 2.311 \\times 10^{-4}~(004)$ ")
+    plt.title("--  True; -  Predicted;  | Uncertainty | \n"+\
+            '$E^{\\infty}_{GS}=$'+str(np.mean(mean[i,-1,0])*scale_gs)+\
+            ' ('+str(var[i,-1,0])+')'
+            )
     plt.ylim([-31, -32.3])
     plt.xlim([0, 60])
     plt.xlabel("NMax")
     plt.ylabel("E (Ground State)")
+    
+
     plt.grid(linestyle=":", linewidth=0.5)
     plt.legend(title="$\\bar{h}\Omega$",ncol=2, title_fontsize=large, loc='lower right', fancybox=True)
     plt.savefig(filename, dpi=100)
@@ -332,7 +353,9 @@ def load_checkpoint(path, device="cpu"):
 
     # -----------------------------------------------------------
     # Initialize the model and load weights from a stored model
-    model = NeuralODE(data_size=2, width_size=128, depth=3, key=model_key)
+    # model = NeuralODE(data_size=2, width_size=128, depth=3, key=model_key)
+    
+    model = NeuralODE(data_size=2, width_size=512, depth=2, key=model_key)
     # optimizer = optim.QHAdam(model.parameters(), lr=1e-3)
     if os.path.exists(path):
         print(f"loaded model {path}")
@@ -401,8 +424,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # --------- The Main Code ------------------------------
-    # ------------------------------------------------------
+    # --------- The Main Code -----------------------------------------------
     # --------- The  parameters and everything ------------------------------
     jax.config.update("jax_enable_x64", False)
     N_Max_points = 9
@@ -410,8 +432,8 @@ if __name__ == "__main__":
     N_max_constraints = 20
     hbaromega_choose = 8
     repeat = 5
-    init_step=3    
-    dist_flag=1e-01
+    init_step=1    
+    dist_flag=1
     list_models=[0,1,2,3]
     
     # -----------------------------------------------------------
@@ -424,7 +446,7 @@ if __name__ == "__main__":
     # ----------------------------------------------------------------
     if args.command == "list":
         trainer, model = load_checkpoint(model_path, device="cpu")
-        x = x.astype(jnp.float32)
+        x = x.astype(jnp.float64)
         x0 = x[:, 0, :]
         t = ts_.reshape([-1])
         config = {
@@ -440,7 +462,7 @@ if __name__ == "__main__":
             model_name=f"models/MLP__Extrapolation_vdist{hbaromega_choose}_{num}.eqx"
             trainer, model = load_checkpoint(model_name, device="cpu")
             params, static = eqx.partition(model, eqx.is_array)
-            loss_val.append( trainer.loss_fn_mse(params, static, batch, loss=True) )
+            loss_val.append( trainer.loss_fn_mse(params, static, batch) )
         
         loss_val=jnp.array(loss_val)    
         print(

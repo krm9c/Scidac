@@ -34,12 +34,14 @@ class Func(eqx.Module):
 
     def __call__(self, t, y, args):
         # print("I am starting here", y.shape)
-        y = self.mlp(y)
+        # return self.mlp(y)*
+        return self.mlp(y)* (jnp.exp(t) )
         # print("I am out as follows", y.shape, y)
-        return y
+        # return y
 
 
 class NeuralODE(eqx.Module):
+
     func: Func
 
     def __init__(self, data_size, width_size, depth, *, key, **kwargs):
@@ -48,7 +50,6 @@ class NeuralODE(eqx.Module):
 
     def __call__(self, ts, y0):
         # print("within the neural ode", ts.shape, y0.shape)
-
         solution = diffrax.diffeqsolve(
             diffrax.ODETerm(self.func),
             diffrax.Dopri5(),
@@ -56,31 +57,35 @@ class NeuralODE(eqx.Module):
             t1=ts[-1],
             dt0=ts[1] - ts[0],
             y0=y0,
-            # stepsize_controller=diffrax.PIDController(rtol=1e-3, atol=1e-6),
+            stepsize_controller=diffrax.PIDController(rtol=1e-5, atol=1e-6),
             saveat=diffrax.SaveAt(ts=ts),
         )
-
-        return solution.ys
-
-
-# #------------------------------------------------------------------------------------------------------------------------------------------------
-# # imports
+        
+        ys = solution.ys        
+        return ys
+    
+##------------------------------------------------------------------------------------------------------------------------------------------------
+## imports
 # import matplotlib.pyplot as plt
 # import jax
 # import jax.numpy as jnp
 # import jax.tree_util as tree
 # from functools import partial
-
 # import numpy as np_
 # from jax import lax
 # import diffrax
 # from utils import sp_matmul
 # import equinox as eqx
-# ## Train now a CNN and test the trainer and then, the older model
 
+# ------------------------------------------------------------------------------------------------------------------------------------------------
+# Train now a CNN and test the trainer and then, the older model
+# ------------------------------------------------------------------------------------------------------------------------------------------------
 # from jaxtyping import Array, Float, Int, PyTree  # https://github.com/google/jaxtyping
-# #------------------------------------------------------------------------------------------------------------------------------------------------
-# # Dropout Layer
+# ------------------------------------------------------------------------------------------------------------------------------------------------
+# Dropout Layer
+# ------------------------------------------------------------------------------------------------------------------------------------------------
+
+
 # class Dropout(eqx.Module):
 #     rate: float
 #     def __init__(self, rate=0.5):

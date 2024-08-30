@@ -31,15 +31,15 @@ export https_proxy=http://proxy.tmi.alcf.anl.gov:3128
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate jax__
 
+# rm models/MLP__Extrapolation_vdist8_0.eqx
+rm Figures/training/*.png
+python test_models.py -m 0 train models -e 5000 -s 500
+# python test_models.py -m 1 train models -e 20 -s 500 
+# python test_models.py -m 2 train models -e 20 -s 500 
+# python test_models.py -m 3 train models -e 20 -s 500 
 
-python test_models.py -m 0 train models -e 5000 -s 200
-# python test_models.py -m 1 train models -e 1000 -s 200 
-# python test_models.py -m 2 train models -e 1000 -s 200 
-# python test_models.py -m 3 train models -e 1000 -s 200 
-
-
-python test_models.py list models
-python test_models.py plot models
+# python test_models.py list models
+# python test_models.py plot models
 
 
 conda deactivate

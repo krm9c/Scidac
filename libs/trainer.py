@@ -83,69 +83,74 @@ class Trainer(eqx.Module):
         self.dict = {}
 
     # --------------------------------------------------
-    @eqx.filter_jit
-    def loss_fn_mse(self, params, statics, batch, loss=True):
+    # @eqx.filter_jit
+    def loss_fn_mse(self, params, statics, batch, loss=False):
         # ---------------------------------------------
         t, x0, x, config = batch
-
         # ---------------------------------------------
-        init_step = config["int_step"]
-        N_max_constraints = config["N_Max_constraints"]
-        dist_flag = config["dist_flag"]
-        step = config["step"]
+        # init_step = config["int_step"]
+        # N_max_constraints = config["N_Max_constraints"]
+        # # dist_flag = config["dist_flag"]
+        # step = config["step"]
         x0 = jnp.asarray(x0)
-        x = jnp.asarray(x)
-
+        x  = jnp.asarray(x)
+        # start=40
         # ---------------------------------------------
         model = eqx.combine(params, statics)
         xhat = jax.vmap(model, in_axes=(None, 0))(t, x0)
-
+        # vect_max = jnp.argmax( jnp.abs(xhat.at[:, -1, 0].get()), axis = 0 )
+        # xhat = xhat.at[:, start:, :].set(xhat.at[vect_max, start:, :].get())
         # -----------------------------------------------------------------
         # Go to the same point constraints
-        start =  40 # (N_max_constraints+10)
-        # print(init_step)
-        # -----------------------------------------------------------------
-        # print("prediction shape", xhat.shape)
-        vect_min = jnp.argmax( jnp.abs(xhat[:, -1, 0]), axis = 0 )
-        dist = jnp.linalg.norm( t[start:] * (xhat[vect_min, start:, 0] - xhat[:, start:, 0]))+jnp.sum((1-xhat[vect_min, start:, 0])**2)
-        error = jnp.sum( (1/(0.5-t[:9])**2)*  jnp.sum( jnp.sum( (x - xhat[:, :9, :] )**2, axis =2) , axis=0) ) 
-                
-        ts_del = t[start:] - t[(start - 1) : -1]
-        error_grad = jnp.mean(
-            (
-                t[(start - 1) : -1])
-                * jnp.sqrt(
+        factor_E = (1/(0.17-t[:x.shape[1]])*2)
+        R = xhat[:, :x.shape[1], :]
+        error = jnp.sum(factor_E*jnp.mean(\
+                jnp.sum( (x-R)**2, axis =2) , axis=0) )         
+        start=20
+        ts_del = (t[start:] - t[(start - 1):-1]).reshape([-1,1])
+        X1 = xhat.at[:, start:, :].get()
+        X2 = xhat.at[:, (start-1):53, :].get()
+        diff = jnp.sum((X1-X2), axis=2)
+        finite_diff = jnp.dot(diff, ts_del)        
+        error_grad = jnp.sqrt(
                     jnp.sum(
-                        ((xhat[:, start:, 0] - xhat[:, (start - 1) : -1, 0]) / ts_del) ** 2
+                        (  finite_diff  ) ** 2
                     )
                 )
-            )
-
-        if loss:
-            if step > init_step:
-                return error + dist_flag * dist
-            else:
-                return error
+        L  = error   # +0.1*error_grad        
+        
+        # if loss:
+        #     # if step%10==0:
+        #         # print(step, "before changing dist flag", config["dist_flag"])
+        #         # config["dist_flag"]=config["dist_flag"]*10
+        #         # print("changing dist flag", config["dist_flag"])
+        #         # if config["dist_flag"] >1000:
+        #         #     print("changing the weights.")
+        #         #     config["dist_flag"]=1
+        #     if step > init_step:
+        #         return 100*(Entropy+10*dist_Entropy)
+        #     else:
+        #         return 100*Entropy
+        # else:
+        if loss==True:
+            return L,  (L, error, error, error_grad, xhat)
         else:
-            return error, dist, error_grad, xhat
-
+            return L
+        
     # --------------------------------------------------
-    @eqx.filter_jit
-    def return_loss_grad(self, params, static, batch):
-        grads = jax.grad(self.loss_fn_mse)(params, static, batch)
-        loss, dist, error_grad, yhat = self.loss_fn_mse(
-            params, static, batch, loss=False
-        )
-        return (loss, (loss, dist, error_grad, yhat)), grads
-
     # --------------------------------------------------
-    @eqx.filter_jit
+    # @eqx.filter_jit
     def evaluate__(self, params, static, batch):
         model = eqx.combine(params, static)
         t, x0, _, _ = batch
         yhat = jax.vmap(model, in_axes=(None, 0))(t, x0)
+        # vect_max = jnp.argmax( jnp.abs(yhat.at[:, -1, 0].get()), axis = 0 )
+        # yhat=yhat.at[:, -1, 0].set(yhat[vect_max, -1, 0])
         return yhat
 
+    
+    
+    
     # -------------------------------------------------------------
     def train__EUC__(
         self,
@@ -159,9 +164,10 @@ class Trainer(eqx.Module):
         print_iter=200,
     ):
         from tqdm import tqdm
-
+        import numpy as np
+        import optax
         t, x, init_step, N_max_constraints, dist_flag, model_num = trainloader
-        x = x.astype(np_.float32)
+        x = x
         x0 = x[:, 0, :]
         t = t.reshape([-1])
         config = {
@@ -171,10 +177,34 @@ class Trainer(eqx.Module):
             "step": init_step,
         }
         batch = (t, x0, x, config)
-        opt_state = optim.init_state(init_params=params, static=static, batch=batch)
-
-        # --------------------------------------------------------
+        
+        def return_loss_grad(params):
+            grads, Losses = jax.grad(self.loss_fn_mse, has_aux=True)(params, static, batch, loss = True)
+            L, Entropy, dist_Entropy, error, xhat= Losses
+            # self.loss_fn_mse(params, statics, batch, loss=False)
+            return (L, (L, Entropy, dist_Entropy, error, xhat) ), grads
+        
+        def return_loss_grad_second(params):
+            return self.loss_fn_mse(params, static, batch, loss=False)
+        
+        
+        # Jax opt way
+        # opt_state = optim.init_state(params)
+        # lbfgs_scaler = optax.scale_by_lbfgs()
+        # scaler = optax.normalize_by_update_norm()
+        # scaler_state = scaler.init(params)
+        # linesearch = optax.scale_by_backtracking_linesearch(
+        #     max_backtracking_steps=100, store_grad=True
+        # )
+        # linesearch = optax.scale_by_zoom_linesearch(max_linesearch_steps=100, verbose=True)
+        # optim = optax.chain(optim, linesearch)
+        # optim = optax.lbfgs(learning_rate = 1e-04, memory_size=100)
+        # linesearch=optax.scale_by_zoom_linesearch(
+        # max_linesearch_steps=50, verbose=True)
+        
         pbar = tqdm(range(n_iter))
+        # value_and_grad_fun = optax.value_and_grad_from_state(return_loss_grad_second)   
+        opt_state =optim.init(params)
         for step in pbar:
             batch = (
                 t,
@@ -187,32 +217,81 @@ class Trainer(eqx.Module):
                     "step": step,
                 },
             )
-            params, opt_state = optim.update(
-                params=params, state=opt_state, static=static, batch=batch
-            )
-            (error, dist, error_grad, yhat) = opt_state.aux
-            pbar.set_postfix(
-                {"MSE:": error, "Distance Loss": dist, "gradient": error_grad}
-            )
 
+
+            # ---------------------------------------------------------
+            # jaxopt way
+            # params, opt_state = optim.update(
+            #     params=params, state=opt_state, statics=static, batch=batch  )            
+            # params, opt_state = optim.run(params, statics=static, batch=batch)
+            
+            
+            # ---------------------------------------------------------
+            # optax L-bfgs
+            # L, grad = value_and_grad_fun(params, state=opt_state)
+            
+            # (L, (L, error, dist, error_grad, yhat)) =\
+            #     self.loss_fn_mse(params, static, batch,\
+            #     loss=True)
+
+            
+            
+            # ---------------------------------------------------------
+            # optax first order
+            losses, grad = return_loss_grad(params=params)  
+            (L, (L, error, dist, error_grad, yhat)) = losses
+            updates, opt_state = optim.update(
+                grad, opt_state, params, value=L,\
+                grad=grad, value_fn=return_loss_grad_second
+            )
+            params = optax.apply_updates(params, updates)            
+            # print(yhat[:,-1,0])
+
+
+            # updates, opt_state = optim.update(
+            #     grad, opt_state, params, value=L, grad=grad,\
+            #     value_fn=self.return_loss_grad, statics=static, batch=batch
+            # )            
+            # updates, scaler_state = scaler.update(grad, scaler_state, params)
+            # updates, opt_state = opt.pdate(grad, opt_state, params,\
+            #         value=L, grad=grad, value_fn=return_loss_grad)
+            # updates, opt_state = optim.update(grad, opt_state, params)
+            
+            # params = step((params, opt_state)) # optax.apply_update(params, updates)
+            
+            # params = optax.apply_updates(params, updates)
+            # print('Objective function: ', f(params))
+            # (error, dist, error_grad, yhat) = opt_state.aux
+            
+            pbar.set_postfix(
+                {
+                    \
+                    "L":L, "MSE:": error,\
+                    "Distance Loss": dist,\
+                    "gradient": error_grad
+                    \
+                }
+            )
             if step % save_iter == 0:
                 model = eqx.combine(params, static)
                 eqx.tree_serialise_leaves(model_path, model)
 
             if step % print_iter == 0:
                 # print(x.shape, t.shape, x0.shape)
+                # print(t[:9], t[:9]*60)
                 plt.figure()
                 [
-                    plt.plot(t[0:9], x[i, :, 0], linestyle="-", c=colors[i])
+                    plt.plot(t[0:9]*60, x[i, :, 0]*(-32.5), linestyle="-", c=colors[i])
                     for i in range(x.shape[0])
                 ]
                 [
-                    plt.plot(t, yhat[i, :, 0], linestyle="--", c=colors[i])
+                    plt.plot(t*60, yhat[i, :, 0]*(-32.5), linestyle="--", c=colors[i])
                     for i in range(x.shape[0])
                 ]
                 # plt.plot(t, x1hat)
-                plt.xlim([0, 1])
-                # plt.ylim([-28,-33])
+                # plt.xlim([0, 1])
+                plt.title( str(np.mean(yhat[:,-1,0])*-32.5) + '(' + str( np.std(yhat[:,-1,0])**2*(32.5) )  + ')' )
+                plt.ylim([-31.5,-32.5])
                 plt.xlabel("NMax")
                 plt.ylabel("E (Ground State)")
                 plt.grid(linestyle=":", linewidth=0.5)
