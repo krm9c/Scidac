@@ -89,7 +89,8 @@ class Trainer(eqx.Module):
         t, x0, x, config = batch
         # ---------------------------------------------
         # init_step = config["int_step"]
-        # N_max_constraints = config["N_Max_constraints"]
+        # N_max_constraints = config["N_Max
+        # _constraints"]
         # # dist_flag = config["dist_flag"]
         # step = config["step"]
         x0 = jnp.asarray(x0)
@@ -98,26 +99,40 @@ class Trainer(eqx.Module):
         # ---------------------------------------------
         model = eqx.combine(params, statics)
         xhat = jax.vmap(model, in_axes=(None, 0))(t, x0)
-        # vect_max = jnp.argmax( jnp.abs(xhat.at[:, -1, 0].get()), axis = 0 )
-        # xhat = xhat.at[:, start:, :].set(xhat.at[vect_max, start:, :].get())
+        
         # -----------------------------------------------------------------
         # Go to the same point constraints
-        factor_E = (1/(0.17-t[:x.shape[1]])*2)
-        R = xhat[:, :x.shape[1], :]
-        error = jnp.sum(factor_E*jnp.mean(\
-                jnp.sum( (x-R)**2, axis =2) , axis=0) )         
-        start=20
+        factor_E = ( 1 / (1.1-t[:x.shape[1]]) )
+        Ehat = xhat[:, :x.shape[1], 0]
+        E = x[:, :, 0]
+        diff = factor_E*(Ehat-E)
+        # error_last = jnp.sum( ((1/(0.17-t[x.shape[1]])*2)*(x[:,x.shape[1], :]-xhat[:, x.shape[1], :]))**2 )
+        error = jnp.mean(diff**2)
+                        
+
+
+        start=10      
         ts_del = (t[start:] - t[(start - 1):-1]).reshape([-1,1])
         X1 = xhat.at[:, start:, :].get()
-        X2 = xhat.at[:, (start-1):53, :].get()
-        diff = jnp.sum((X1-X2), axis=2)
+        X2 = xhat.at[:, (start-1):(xhat.shape[1]-1), :].get()
+        diff = jnp.sum(jnp.sum((X1-X2), axis=2), axis = 0)
         finite_diff = jnp.dot(diff, ts_del)        
         error_grad = jnp.sqrt(
                     jnp.sum(
-                        (  finite_diff  ) ** 2
+                        finite_diff**2
                     )
                 )
-        L  = error   # +0.1*error_grad        
+        
+        
+        # diff = jnp.abs( jax.lax.stop_gradient(xhat.at[vect_max,-1,:].get())-xhat.at[:, -1, :].get() )
+        diff1 = jnp.sum(jnp.abs(1-xhat.at[:, start:, :].get()), axis=2)
+        # finite_diff = jnp.dot(diff, ts_del)        
+        error_same_point = jnp.sqrt(
+                    jnp.sum(
+                        diff1**2  )
+                    )
+        
+        L  = error # +0.001*error_same_point # +0.01*error_same_point
         
         # if loss:
         #     # if step%10==0:
@@ -132,10 +147,13 @@ class Trainer(eqx.Module):
         #     else:
         #         return 100*Entropy
         # else:
+        
+        
         if loss==True:
-            return L,  (L, error, error, error_grad, xhat)
+            return L,  (L, error, error_same_point, error_grad, xhat)
         else:
             return L
+        
         
     # --------------------------------------------------
     # --------------------------------------------------
@@ -149,7 +167,16 @@ class Trainer(eqx.Module):
         return yhat
 
     
-    
+    def save_opt_state_into_pkl(self, pkl_path, state):
+        import cloudpickle
+        epoch, opt_state, optimizer = state
+        with open(pkl_path, "wb") as p:
+            params = { 'epoch': epoch,
+            'opt_state': opt_state, 
+            'optimizer': optimizer
+            }
+            cloudpickle.dumps(params, p)
+        print("saved things")
     
     # -------------------------------------------------------------
     def train__EUC__(
@@ -162,6 +189,7 @@ class Trainer(eqx.Module):
         n_iter=1000,
         save_iter=200,
         print_iter=200,
+        switch=1000
     ):
         from tqdm import tqdm
         import numpy as np
@@ -179,6 +207,7 @@ class Trainer(eqx.Module):
         batch = (t, x0, x, config)
         
         def return_loss_grad(params):
+            # print(batch, params, static)
             grads, Losses = jax.grad(self.loss_fn_mse, has_aux=True)(params, static, batch, loss = True)
             L, Entropy, dist_Entropy, error, xhat= Losses
             # self.loss_fn_mse(params, statics, batch, loss=False)
@@ -196,13 +225,11 @@ class Trainer(eqx.Module):
         # linesearch = optax.scale_by_backtracking_linesearch(
         #     max_backtracking_steps=100, store_grad=True
         # )
-        # linesearch = optax.scale_by_zoom_linesearch(max_linesearch_steps=100, verbose=True)
+        # linesearch = optax.scale_by_zoom_linesearch(max_linesearch_steps=1000, verbose=True)
         # optim = optax.chain(optim, linesearch)
-        # optim = optax.lbfgs(learning_rate = 1e-04, memory_size=100)
-        # linesearch=optax.scale_by_zoom_linesearch(
-        # max_linesearch_steps=50, verbose=True)
         
         pbar = tqdm(range(n_iter))
+        lr = 1e-03
         # value_and_grad_fun = optax.value_and_grad_from_state(return_loss_grad_second)   
         opt_state =optim.init(params)
         for step in pbar:
@@ -218,6 +245,15 @@ class Trainer(eqx.Module):
                 },
             )
 
+
+            if step==switch:
+                optim = optax.lbfgs(learning_rate = 1, memory_size=100)
+                # linesearch=optax.scale_by_zoom_linesearch(
+                # max_linesearch_steps=50, verbose=True)
+                opt_state =optim.init(params)
+                save_iter=10
+                print_iter=10
+                print("The optimizer is switched", optim, save_iter)
 
             # ---------------------------------------------------------
             # jaxopt way
@@ -236,7 +272,7 @@ class Trainer(eqx.Module):
 
             
             
-            # ---------------------------------------------------------
+            # -------------------------------------- -------------------
             # optax first order
             losses, grad = return_loss_grad(params=params)  
             (L, (L, error, dist, error_grad, yhat)) = losses
@@ -244,6 +280,10 @@ class Trainer(eqx.Module):
                 grad, opt_state, params, value=L,\
                 grad=grad, value_fn=return_loss_grad_second
             )
+            
+            
+            
+            
             params = optax.apply_updates(params, updates)            
             # print(yhat[:,-1,0])
 
@@ -274,24 +314,30 @@ class Trainer(eqx.Module):
             )
             if step % save_iter == 0:
                 model = eqx.combine(params, static)
-                eqx.tree_serialise_leaves(model_path, model)
-
+                eqx.tree_serialise_leaves(model_path, model)        
+                # self.save_opt_state_into_pkl('load__optimize.pkl', (step, optim, optim ))
+                # lr = lr*0.99
+                # optim = optax.adam(lr)
+                
+                
             if step % print_iter == 0:
                 # print(x.shape, t.shape, x0.shape)
                 # print(t[:9], t[:9]*60)
+                # print(x, yhat)
                 plt.figure()
                 [
-                    plt.plot(t[0:9]*60, x[i, :, 0]*(-32.5), linestyle="-", c=colors[i])
+                    plt.plot(t[0:9]*18, x[i, :, 0]*(-32.5), linestyle="-", c=colors[i])
                     for i in range(x.shape[0])
                 ]
                 [
-                    plt.plot(t*60, yhat[i, :, 0]*(-32.5), linestyle="--", c=colors[i])
+                    plt.plot(t*18, yhat[i, :, 0]*(-32.5), linestyle="--", c=colors[i])
                     for i in range(x.shape[0])
                 ]
                 # plt.plot(t, x1hat)
                 # plt.xlim([0, 1])
-                plt.title( str(np.mean(yhat[:,-1,0])*-32.5) + '(' + str( np.std(yhat[:,-1,0])**2*(32.5) )  + ')' )
-                plt.ylim([-31.5,-32.5])
+                plt.title( str(np.mean(yhat[:,-1,0])* (-32.5)) + '(' + str( jnp.abs(np.max(yhat[:,-1,0])- np.min(yhat[:,-1,0])) )  + ')' )
+                plt.ylim([-31.35,-32.2])
+                plt.xlim([8,20])
                 plt.xlabel("NMax")
                 plt.ylabel("E (Ground State)")
                 plt.grid(linestyle=":", linewidth=0.5)

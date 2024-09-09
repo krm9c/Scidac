@@ -27,7 +27,7 @@ from libs.trainer import *
 
 def return_data(hbaromega_choose, plot=False):
     X = np.load("data/processed_extrapolation.npy", allow_pickle=True)
-    
+    repeat=0
     if plot:
         ETr = X[()]["data"][:, 1:]
         h_omega = X[()]["data"][:, 0]
@@ -37,12 +37,11 @@ def return_data(hbaromega_choose, plot=False):
     else:
         ETr = X[()]["data"][:hbaromega_choose, 1:]
         h_omega = X[()]["data"][:hbaromega_choose, 0]
-        N_Max = X[()]["Nmax"].reshape([-1])
+        N_Max = np.array(X[()]["Nmax"]).reshape([-1])
         ts_ = np.concatenate([N_Max + j * 18 for j in range(repeat + 1)], axis=0)
         ts_ = np.vstack(ts_).reshape([-1, 1])
-
-
-    print("X", ETr.shape, "N_Max", ts_.shape, "hbarOmega", h_omega.shape)
+        
+    # print("X", ETr.shape, "N_Max", ts_.shape, "hbarOmega", h_omega.shape, N_Max.shape, N_Max.dtype, ts_.dtype)
     # --------------------------------------------
     # Normalizing factors
     scale_gs = -32.5
@@ -54,17 +53,27 @@ def return_data(hbaromega_choose, plot=False):
     ts_ = ts_ / scale_Nmax
     x1 = ETr / scale_gs
     x2 = h_omega / scale_ho
+    x3 = ts_[0:9]
     # --------------------------------------------
     # Reverse Normalization
-    # print(np.max(x1), np.max(x2), scale_gs, scale_ho, scale_Nmax )
+    print(np.max(x1), np.max(x2), scale_gs, scale_ho, scale_Nmax, x1.shape, x2.shape, x3.shape, x3.dtype)
     # x1=x1*scale_gs
     # x2=x2*scale_ho
     # t=t*scale_Nmax
+    # repeat NMax across the zeroth dimension 8 times
+    x3 = jnp.expand_dims(x3, 0)
+    x3 = jnp.repeat(x3, x1.shape[0], axis=0)
+    
+    # repeat hbar omega across the second dimensions 9 times
     x2 = jnp.expand_dims(jnp.expand_dims(x2, 1), 1)
-    x1 = jnp.expand_dims(x1, 2)
     x2 = jnp.repeat(x2, x1.shape[1], axis=1)
+    
+    # just expand the ground state
+    x1 = jnp.expand_dims(x1, 2)
     x = jnp.concatenate([x1, x2], axis=2)
-
+    
+    # Check across one hbar omega different NMax and different ground state.
+    #print(x[0,:,0], x[0,:,1], x[0,:,2])
     return ts_, x, scale_gs, scale_ho, scale_Nmax
 
 
@@ -80,6 +89,7 @@ def main(
     init_step,
     save_iter=200,
     print_iter=200,
+    switch=5000
 ):
     params, static = eqx.partition(model, eqx.is_array)
     # -----------------------------------------------------------
@@ -104,6 +114,11 @@ def main(
     #     # linesearch_init='current',\
     # )
     optim = optax.adam(1e-04)
+    # optim__path = 'load__optimize.pkl'
+    # if os.path.exists(optim__path):
+    #     epoch, opt_state, optim = load_opt_state_from_pkl(optim__path)
+    #     print(f"loaded model {optim__path}")
+
     # t = np.linspace(0, max(ts_), 100)
     # optim = optax.scale_by_lbfgs()
     # -----------------------------------------------------------
@@ -116,6 +131,7 @@ def main(
         n_iter=iterations,
         save_iter=save_iter,
         print_iter=print_iter,
+        switch=switch
     )
     model = eqx.combine(params, static)
     return trainer, model
@@ -123,26 +139,26 @@ def main(
 
 # ----------------------------------------------------------------
 # The plotting
-def generate_plot(filename, model_name, model_list, x):
+def generate_plot(filename, model_name, model_list, x, num_curves=8):
     print("plotting="+filename)
     # -----------------------------------------------
     import seaborn as sns
     sns.color_palette("bright")
-    large = 20
-    med = 18
-    small = 16
+    large = 18
+    med = 16
+    small = 14
     marker_size = 1.01
     lw = 0.1
     inten = 0.4
-
+    scale_gs=-32.5
+    scale_Nmax=18
     def cm2inch(value):
         return value / 2.54
-
     COLOR = "darkslategray"
     params = {
         "axes.titlesize":  med,
         "legend.fontsize": med,
-        "figure.figsize": (cm2inch(36), cm2inch(40)),
+        "figure.figsize": (cm2inch(32), cm2inch(18)),
         "axes.labelsize": med,
         "axes.titlesize": large,
         "xtick.labelsize": med,
@@ -182,59 +198,75 @@ def generate_plot(filename, model_name, model_list, x):
 
     plt.rcParams.update(params)
     plt.rc("text", usetex=False)
-    plt.figure()
+    plt.figure(dpi=1000)
     xhat=[]
     for i,num in enumerate(model_list):
         model_path = model_name+str(num)+".eqx"
         _, model = load_checkpoint(model_path, device="cpu")
         x0 = x[:, 0, :]
         t = ts_.reshape([-1])
+        # print(t.shape)
         xhat.append(jax.vmap(model, in_axes=(None, 0))(t, x0))
-        
+    
         
     xhat = jnp.array(xhat)
     mean = jnp.mean(xhat, axis = 0)
-    var  = jnp.sqrt(jnp.std(xhat, axis = 0))
+    print("xhat", x.shape, mean.shape)
+    Err = jnp.abs(x-mean)
+    print(Err.shape)
+    print("-------------------------------------------------------------------------")
+    for i in range(10):
+        print(x[i,0, 1]*scale_ho,  "mean",   mean[i,:, 0]*scale_gs)
+        print(x[i,0, 1]*scale_ho,  "actual", x[i,:, 0]*scale_gs)
+        print(Err[i, :,0])
+    print("-------------------------------------------------------------------------")
+    var  =  jnp.std( mean[:,-1, 0], axis = 0)**2
+    
+    [ print(Err[i, :,0]) for i in range(num_curves) ]
+    # print(mean[:,53,0])
     [
         plt.plot(
             ts_[0:9, :] * scale_Nmax,
-            x[i, :, 0] * scale_gs,
+            x[i, :, 0]*scale_gs,
             linestyle="--",
             c=colors[i],
             label= str(   round(x[i, 0, 1]*scale_ho,1)  ),
         )
-        for i in range(hbaromega_choose)
+        for i in range(num_curves)
     ]
     [
         plt.errorbar(
             ts_ * scale_Nmax,
-            mean[i, :, 0] * scale_gs,
-            yerr=var[i,:,0],
+            mean[i, :, 0]*scale_gs,
+            yerr=var,
             barsabove=True,
             ecolor=colors[i],
-            label= str( round(x[i, 0, 1]*scale_ho, 2) ),
+            label= str(round(x[i, 0, 0], 5)*scale_ho ),
         )
-        for i in range(hbaromega_choose)
+        for i in range(num_curves)
     ]
-    # print("scale_gs", scale_gs)
-    print(mean[i,:,0] * scale_gs, var[i,:,0])
-    plt.title("--  True; -  Predicted;  | Uncertainty | \n"+\
-            '$E^{\\infty}_{GS}=$'+str(np.mean(mean[i,-1,0])*scale_gs)+\
-            ' ('+str(var[i,-1,0])+')'
-            )
-    plt.ylim([-31, -32.3])
-    plt.xlim([0, 60])
-    plt.xlabel("NMax")
-    plt.ylabel("E (Ground State)")
     
 
+    
+    
+    
+    
+    plt.title("--  True; -  Predicted;  | Uncertainty | \n"+\
+            '$E^{\\infty}_{GS}=$'+str(np.max(mean[:,-1,0], axis=0)*scale_gs)+\
+            ' ('+str( np.std(mean[:,-1, 0], axis=0) )+')'
+            )
+    plt.ylim([0.965*scale_gs, 0.985*scale_gs])
+    plt.xlim([8, 20])
+    plt.xlabel("NMax")
+    plt.ylabel("E (Ground State)")
     plt.grid(linestyle=":", linewidth=0.5)
-    plt.legend(title="$\\bar{h}\Omega$",ncol=2, title_fontsize=large, loc='lower right', fancybox=True)
+    plt.legend(title="$\\bar{h}\Omega$",ncol=2, title_fontsize=small, loc='lower right', fancybox=True)
+    # plt.show()
     plt.savefig(filename, dpi=100)
     plt.close()
-
+    
+    
 # ----------------------------------------------------------------
-# The plotting
 def generate_plot_hbar_omega(filename, model_name, model_list, x):
     print("plotting="+filename)
     # -----------------------------------------------
@@ -318,7 +350,7 @@ def generate_plot_hbar_omega(filename, model_name, model_list, x):
             c=colors[i],
             label= str(   ts_[i]*scale_Nmax  ),
         )
-        for i in range(10)
+        for i in range(9)
     ]
     [
         plt.errorbar(
@@ -329,34 +361,42 @@ def generate_plot_hbar_omega(filename, model_name, model_list, x):
             ecolor=colors[i],
             label= str( ts_[i]*scale_Nmax ),
         )
-        for i in range(10)
+        for i in range(9)
     ]
     
     plt.title("--  True; -  Predicted;  | Uncertainty")
-    # plt.ylim([-31, -32.3])
-    plt.xlim([0, 68])
+    plt.ylim([-20, -32.3])
+    plt.xlim([5, 22.5])
     plt.xlabel("$\\bar{h}\Omega$ (MeV)" )
     plt.ylabel("E (Ground State)")
     plt.grid(linestyle=":", linewidth=0.5)
     plt.legend(title="$NMax$",ncol=2, title_fontsize=large, loc='lower right', fancybox=True)
-    plt.savefig(filename, dpi=100)
+    plt.savefig(filename, dpi=1000)
     plt.close()
 
+
+########################################################################################
+def load_opt_state_from_pkl(pkl_path):
+    with open(pkl_path, "wb") as p:
+        params = pickle.loads(p)    
+    epoch = params['epoch']
+    opt_state = params['opt_state']       
+    optimizer= params['optimizer']
+    return epoch, opt_state, optimizer 
 
 
 ########################################################################################
 def load_checkpoint(path, device="cpu"):
     # -----------------------------------------------------------
     trainer = Trainer()
-    key = jax.random.PRNGKey(SEED)
-    data_key, model_key, loader_key = jr.split(key, 3)
+    # key = jax.random.PRNGKey(SEED)
+    # data_key, model_key, loader_key = jr.split(key, 3)
 
     # -----------------------------------------------------------
     # Initialize the model and load weights from a stored model
     # model = NeuralODE(data_size=2, width_size=128, depth=3, key=model_key)
     
-    model = NeuralODE(data_size=2, width_size=512, depth=2, key=model_key)
-    # optimizer = optim.QHAdam(model.parameters(), lr=1e-3)
+    model = NeuralODE(data_size=2, width_size=64, depth=3, key=SEED)
     if os.path.exists(path):
         print(f"loaded model {path}")
         model = eqx.tree_deserialise_leaves(path, model)
@@ -421,21 +461,26 @@ if __name__ == "__main__":
     train_parser.add_argument(
         "-e", "--epochs", default=25000, type=int, help="number of epochs to train for"
     )
-
+    train_parser.add_argument(
+        "-os",
+        "--optimizer_switch",
+        default=5000,
+        type=int,
+        help="number of epochs at which to switch the optimizer",
+    )
+    
     args = parser.parse_args()
 
     # --------- The Main Code -----------------------------------------------
     # --------- The  parameters and everything ------------------------------
-    jax.config.update("jax_enable_x64", False)
     N_Max_points = 9
     SEED = 5678
     N_max_constraints = 20
     hbaromega_choose = 8
-    repeat = 5
+    repeat = 3
     init_step=1    
     dist_flag=1
     list_models=[0,1,2,3]
-    
     # -----------------------------------------------------------
     # Get data
     ts_, x, scale_gs, scale_ho, scale_Nmax = return_data(hbaromega_choose)
@@ -485,6 +530,7 @@ if __name__ == "__main__":
             print_iter=args.save,
             factor=dist_flag,
             init_step=init_step,
+            switch=args.optimizer_switch
         )
         
         # ----------------------------------------------------------------
