@@ -111,7 +111,7 @@ class Trainer(eqx.Module):
                         
 
 
-        start=10      
+        start=5      
         ts_del = (t[start:] - t[(start - 1):-1]).reshape([-1,1])
         X1 = xhat.at[:, start:, :].get()
         X2 = xhat.at[:, (start-1):(xhat.shape[1]-1), :].get()
@@ -123,16 +123,17 @@ class Trainer(eqx.Module):
                     )
                 )
         
-        
-        # diff = jnp.abs( jax.lax.stop_gradient(xhat.at[vect_max,-1,:].get())-xhat.at[:, -1, :].get() )
-        diff1 = jnp.sum(jnp.abs(1-xhat.at[:, start:, :].get()), axis=2)
+        vect_mean = jnp.mean(xhat.at[:, -1, 0].get(), axis = 0)
+        diff = jnp.abs(vect_mean - xhat.at[:, -1, :].get() )
+        # diff1 = jnp.sum(jnp.abs(1-xhat.at[:, start:, :].get()), axis=2)
         # finite_diff = jnp.dot(diff, ts_del)        
         error_same_point = jnp.sqrt(
                     jnp.sum(
-                        diff1**2  )
+                        diff**2  )
                     )
         
-        L  = error # +0.001*error_same_point # +0.01*error_same_point
+        L  = error 
+        #  +0.01*error_same_point # +0.01*error_same_point
         
         # if loss:
         #     # if step%10==0:
@@ -336,8 +337,8 @@ class Trainer(eqx.Module):
                 # plt.plot(t, x1hat)
                 # plt.xlim([0, 1])
                 plt.title( str(np.mean(yhat[:,-1,0])* (-32.5)) + '(' + str( jnp.abs(np.max(yhat[:,-1,0])- np.min(yhat[:,-1,0])) )  + ')' )
-                plt.ylim([-31.35,-32.2])
-                plt.xlim([8,20])
+                plt.ylim([-30,-35])
+                # plt.xlim([8,20])
                 plt.xlabel("NMax")
                 plt.ylabel("E (Ground State)")
                 plt.grid(linestyle=":", linewidth=0.5)

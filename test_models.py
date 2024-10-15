@@ -10,14 +10,13 @@ import seaborn as sns
 import matplotlib.cm as cm
 import jax
 jax.config.update("jax_enable_x64", True)
-
+# jax.config.update('jax_platform_name', 'cpu' )
 import jax.tree_util as tree
 import numpy as np
 import jax.numpy as jnp
 from jaxopt import OptaxSolver
 import jax.random as jr
 import optax
-
 # -------------------------------------------------------
 ## Regular Linear layer in equinox
 from libs.model import *
@@ -25,9 +24,10 @@ from libs.utils import *
 from libs.trainer import *
 
 
+
 def return_data(hbaromega_choose, plot=False):
     X = np.load("data/processed_extrapolation.npy", allow_pickle=True)
-    repeat=0
+    repeat=1
     if plot:
         ETr = X[()]["data"][:, 1:]
         h_omega = X[()]["data"][:, 0]
@@ -46,14 +46,14 @@ def return_data(hbaromega_choose, plot=False):
     # Normalizing factors
     scale_gs = -32.5
     scale_ho = 50
-    scale_Nmax = np.max(ts_)
+    scale_Nmax = 18
 
     # --------------------------------------------
     # Normalize the dataset for efficiency
     ts_ = ts_ / scale_Nmax
     x1 = ETr / scale_gs
     x2 = h_omega / scale_ho
-    x3 = ts_[0:9]
+    x3 = ts_
     # --------------------------------------------
     # Reverse Normalization
     print(np.max(x1), np.max(x2), scale_gs, scale_ho, scale_Nmax, x1.shape, x2.shape, x3.shape, x3.dtype)
@@ -141,7 +141,10 @@ def main(
 # The plotting
 def generate_plot(filename, model_name, model_list, x, num_curves=8):
     print("plotting="+filename)
+    
+    
     # -----------------------------------------------
+    # ts_, x, scale_gs, scale_ho, scale_Nmax = return_data(hbaromega_choose)
     import seaborn as sns
     sns.color_palette("bright")
     large = 18
@@ -200,19 +203,29 @@ def generate_plot(filename, model_name, model_list, x, num_curves=8):
     plt.rc("text", usetex=False)
     plt.figure(dpi=1000)
     xhat=[]
+    # ts_ = np.arange(0,2,1/).reshape([-1])
     for i,num in enumerate(model_list):
         model_path = model_name+str(num)+".eqx"
         _, model = load_checkpoint(model_path, device="cpu")
         x0 = x[:, 0, :]
         t = ts_.reshape([-1])
+        # t = np.arange(0,5,0.001).reshape([-1])
+        # print(t)
         # print(t.shape)
         xhat.append(jax.vmap(model, in_axes=(None, 0))(t, x0))
     
-        
+    # ts_ = t
     xhat = jnp.array(xhat)
     mean = jnp.mean(xhat, axis = 0)
+    print(mean.shape)
+    np.savetxt('data.csv', np.concatenate([ scale_Nmax*ts_.reshape([1, -1]),\
+                                            scale_gs*mean[:, :, 0].reshape([ 19, ts_.shape[0]]) ],\
+                                            axis =0), delimiter=',')
+    
+    
     print("xhat", x.shape, mean.shape)
-    Err = jnp.abs(x-mean)
+    Err = jnp.abs(x-mean[:,0:9,:])
+    print("NMax", ts_ * scale_Nmax)
     print(Err.shape)
     print("-------------------------------------------------------------------------")
     for i in range(10):
@@ -221,19 +234,20 @@ def generate_plot(filename, model_name, model_list, x, num_curves=8):
         print(Err[i, :,0])
     print("-------------------------------------------------------------------------")
     var  =  jnp.std( mean[:,-1, 0], axis = 0)**2
-    
     [ print(Err[i, :,0]) for i in range(num_curves) ]
     # print(mean[:,53,0])
-    [
-        plt.plot(
-            ts_[0:9, :] * scale_Nmax,
-            x[i, :, 0]*scale_gs,
-            linestyle="--",
-            c=colors[i],
-            label= str(   round(x[i, 0, 1]*scale_ho,1)  ),
-        )
-        for i in range(num_curves)
-    ]
+    
+    # [
+    #     plt.plot(
+    #         ts_[0:9, :] * scale_Nmax,
+    #         x[i, :, 0]*scale_gs,
+    #         linestyle="--",
+    #         c=colors[i],
+    #         label= str(   round(x[i, 0, 1]*scale_ho,1)  ),
+    #     )
+    #     for i in range(num_curves)
+    # ]
+    
     [
         plt.errorbar(
             ts_ * scale_Nmax,
@@ -241,22 +255,18 @@ def generate_plot(filename, model_name, model_list, x, num_curves=8):
             yerr=var,
             barsabove=True,
             ecolor=colors[i],
-            label= str(round(x[i, 0, 0], 5)*scale_ho ),
+            label= str(  round(x[i, 0, 1]*scale_ho,1 ) )
         )
         for i in range(num_curves)
     ]
-    
 
-    
-    
-    
-    
-    plt.title("--  True; -  Predicted;  | Uncertainty | \n"+\
-            '$E^{\\infty}_{GS}=$'+str(np.max(mean[:,-1,0], axis=0)*scale_gs)+\
-            ' ('+str( np.std(mean[:,-1, 0], axis=0) )+')'
-            )
-    plt.ylim([0.965*scale_gs, 0.985*scale_gs])
-    plt.xlim([8, 20])
+    # plt.title("--  True; -  Predicted;  | Uncertainty | \n"
+    #         # +
+    #         # '$E^{\\infty}_{GS}=$'+str(np.max(mean[:,-1,0], axis=0)*scale_gs)+\
+    #         # ' ('+str( np.std(mean[:,-1, 0], axis=0) )+')'
+    #         )
+    plt.ylim([-31, -33])
+    plt.xlim([0, 30])
     plt.xlabel("NMax")
     plt.ylabel("E (Ground State)")
     plt.grid(linestyle=":", linewidth=0.5)
@@ -365,8 +375,8 @@ def generate_plot_hbar_omega(filename, model_name, model_list, x):
     ]
     
     plt.title("--  True; -  Predicted;  | Uncertainty")
-    plt.ylim([-20, -32.3])
-    plt.xlim([5, 22.5])
+    plt.ylim([-30, -33])
+    # plt.xlim([5, 22.5])
     plt.xlabel("$\\bar{h}\Omega$ (MeV)" )
     plt.ylabel("E (Ground State)")
     plt.grid(linestyle=":", linewidth=0.5)

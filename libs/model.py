@@ -67,18 +67,20 @@ class Func(eqx.Module):
     # mlp: MLP
     scale: MLP
     coeff: MLP
+    position: MLP
     # mlp3: eqx.nn.MLP
     # mlp4: eqx.nn.MLP
     def __init__(self, data_size, width_size, depth, *, key, **kwargs):
         super().__init__(**kwargs)
         self.scale = MLP(key=key, input_dim=(data_size), out_dim=100, n_layers=depth, hln=width_size)
         self.coeff = MLP(key=key, input_dim=(data_size), out_dim=100, n_layers=depth, hln=width_size)
-        
+        self.position = MLP(key=key, input_dim=(data_size), out_dim=100, n_layers=depth, hln=width_size)
     def __call__(self, t, y, args):
         # print(y.shape)
-        exponents= (-1*self.scale(y, outfunc=jnp.exp))+self.coeff(y*(t) ) 
+        exponents= (-1*self.scale(y, outfunc=jnp.exp))+self.coeff(y*jnn.sigmoid(t) ) 
+        track__ = jnp.exp(-1*self.position(y))
         # print(exponents.shape)
-        out = a1*jnp.exp(-a2*alpha(hbaromega, t) ) +jnp.mean(jnp.exp( exponents ) )
+        out = jnp.mean( track__*jnp.exp( exponents ) ) 
         # print("before concat", out.shape, y[1].shape)
         out = jnp.array([out, y[1]])
         # print("after concat", out.shape)
