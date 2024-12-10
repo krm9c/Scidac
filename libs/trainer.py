@@ -19,9 +19,6 @@ inten = 0.4
 
 def cm2inch(value):
     return value / 2.54
-
-
-# plt.style.use('seaborn-white')
 COLOR = "darkslategray"
 params = {
     "axes.titlesize": small,
@@ -74,7 +71,7 @@ class Trainer(eqx.Module):
     problem: str
     metric: str
     dict: dict
-
+    
     def __init__(self, logdir="runs", Loss="class", metric="class", problem="vectors"):
         self.writer = SummaryWriter(logdir)
         self.loss = Loss
@@ -84,7 +81,8 @@ class Trainer(eqx.Module):
 
     # --------------------------------------------------
     # @eqx.filter_jit
-    def loss_fn_mse(self, params, statics, batch, loss=False):
+    def loss_fn_mse(self, params, statics, batch,\
+                    loss=False, n_points=9):
         # ---------------------------------------------
         t, x0, x, config = batch
         # ---------------------------------------------
@@ -95,46 +93,42 @@ class Trainer(eqx.Module):
         # step = config["step"]
         x0 = jnp.asarray(x0)
         x  = jnp.asarray(x)
+        
+        
+        # print(x0.shape, x.shape)
         # start=40
         # ---------------------------------------------
         model = eqx.combine(params, statics)
         xhat = jax.vmap(model, in_axes=(None, 0))(t, x0)
-        
+        # vect_mean = jax.lax.stop_gradient(jnp.mean(xhat.at[:, -1, 0].get(), axis = 0).item())
+                # vect_var = jnp.std(xhat.at[:, -1, 0].get(), axis = 0).item()
         # -----------------------------------------------------------------
         # Go to the same point constraints
-        factor_E = ( 1 / (1.1-t[:x.shape[1]]) )
-        Ehat = xhat[:, :x.shape[1], 0]
-        E = x[:, :, 0]
+        # print(x.shape[1], t[0:x.shape[1]], t )
+        vect_mean = 0.9165
+        factor_E = ( 1 / (0.52-t[:n_points]) )
+        Ehat = xhat[:, :n_points, 0]
+        E = x[:, :n_points, 0]
+        
         diff = factor_E*(Ehat-E)
         # error_last = jnp.sum( ((1/(0.17-t[x.shape[1]])*2)*(x[:,x.shape[1], :]-xhat[:, x.shape[1], :]))**2 )
-        error = jnp.mean(diff**2)
-                        
-
-
-        start=5      
-        ts_del = (t[start:] - t[(start - 1):-1]).reshape([-1,1])
-        X1 = xhat.at[:, start:, :].get()
-        X2 = xhat.at[:, (start-1):(xhat.shape[1]-1), :].get()
-        diff = jnp.sum(jnp.sum((X1-X2), axis=2), axis = 0)
-        finite_diff = jnp.dot(diff, ts_del)        
+        error = jnp.mean(diff**2)                
+        # --------------------------------
+        start=20      
+        X1 = xhat[:, start:-1, 0]
+        X2 = xhat[:, (start+1):, 0]
+        diff = (X2 - vect_mean )**2      
+        
         error_grad = jnp.sqrt(
                     jnp.sum(
-                        finite_diff**2
+                        diff
                     )
                 )
         
-        vect_mean = jnp.mean(xhat.at[:, -1, 0].get(), axis = 0)
-        diff = jnp.abs(vect_mean - xhat.at[:, -1, :].get() )
-        # diff1 = jnp.sum(jnp.abs(1-xhat.at[:, start:, :].get()), axis=2)
-        # finite_diff = jnp.dot(diff, ts_del)        
-        error_same_point = jnp.sqrt(
-                    jnp.sum(
-                        diff**2  )
-                    )
-        
-        L  = error 
-        #  +0.01*error_same_point # +0.01*error_same_point
-        
+        diff = jnp.sum(( vect_mean - xhat.at[:, -1, :].get())**2 ) 
+        error_same_point = jnp.linalg.norm(diff)
+        L  = error + 1e-2*(error_grad+0.1*error_same_point)        
+        #+0.01*
         # if loss:
         #     # if step%10==0:
         #         # print(step, "before changing dist flag", config["dist_flag"])
@@ -180,8 +174,7 @@ class Trainer(eqx.Module):
         print("saved things")
     
     # -------------------------------------------------------------
-    def train__EUC__(
-        self,
+    def train__EUC__(self,\
         trainloader,
         params,
         static,
@@ -190,7 +183,8 @@ class Trainer(eqx.Module):
         n_iter=1000,
         save_iter=200,
         print_iter=200,
-        switch=1000
+        switch=1000,
+        n_points=4
     ):
         from tqdm import tqdm
         import numpy as np
@@ -209,7 +203,7 @@ class Trainer(eqx.Module):
         
         def return_loss_grad(params):
             # print(batch, params, static)
-            grads, Losses = jax.grad(self.loss_fn_mse, has_aux=True)(params, static, batch, loss = True)
+            grads, Losses = jax.grad(self.loss_fn_mse, has_aux=True)(params, static, batch, loss = True, n_points=n_points)
             L, Entropy, dist_Entropy, error, xhat= Losses
             # self.loss_fn_mse(params, statics, batch, loss=False)
             return (L, (L, Entropy, dist_Entropy, error, xhat) ), grads
@@ -230,7 +224,6 @@ class Trainer(eqx.Module):
         # optim = optax.chain(optim, linesearch)
         
         pbar = tqdm(range(n_iter))
-        lr = 1e-03
         # value_and_grad_fun = optax.value_and_grad_from_state(return_loss_grad_second)   
         opt_state =optim.init(params)
         for step in pbar:
@@ -288,7 +281,33 @@ class Trainer(eqx.Module):
             params = optax.apply_updates(params, updates)            
             # print(yhat[:,-1,0])
 
+            if error<1e-5:
+                model = eqx.combine(params, static)
+                eqx.tree_serialise_leaves(model_path, model) 
+                
+                plt.figure()
+                [
+                    plt.plot(t[0:n_points], x[i, :n_points, 0], linestyle="-", c=colors[i])
+                    for i in range(x.shape[0])
+                ]
+                [
+                    plt.plot(t, yhat[i, :, 0], linestyle="--", c=colors[i])
+                    for i in range(x.shape[0])
+                ]
+                # plt.plot(t, x1hat)
+                # plt.xlim([0, 1])
+                # plt.title( str(np.mean(yhat[:,-1,0])) + '(' + str( jnp.abs(np.max(yhat[:,-1,0])- np.min(yhat[:,-1,0])) )  + ')' )
+                # plt.ylim([-30,-35])
+                # plt.xlim([8,20])
+                plt.xlabel("NMax")
+                plt.ylabel("E (Ground State)")
+                plt.grid(linestyle=":", linewidth=0.5)
+                plt.savefig("Figures/training/plot_"+str(step)+"model_num"+str(model_num)+"_nmax"+str(n_points)+"_.png", dpi=500)
+                plt.close()
 
+
+ 
+                return params
             # updates, opt_state = optim.update(
             #     grad, opt_state, params, value=L, grad=grad,\
             #     value_fn=self.return_loss_grad, statics=static, batch=batch
@@ -325,24 +344,25 @@ class Trainer(eqx.Module):
                 # print(x.shape, t.shape, x0.shape)
                 # print(t[:9], t[:9]*60)
                 # print(x, yhat)
+                # t__ = np.concatenate([t[0:9].reshape([-1])*18, t[9:].reshape([-1])*18*3], axis = 0)
                 plt.figure()
                 [
-                    plt.plot(t[0:9]*18, x[i, :, 0]*(-32.5), linestyle="-", c=colors[i])
+                    plt.plot(t[0:n_points], x[i, :n_points, 0], linestyle="-", c=colors[i])
                     for i in range(x.shape[0])
                 ]
                 [
-                    plt.plot(t*18, yhat[i, :, 0]*(-32.5), linestyle="--", c=colors[i])
+                    plt.plot(t, yhat[i, :, 0], linestyle="--", c=colors[i])
                     for i in range(x.shape[0])
                 ]
                 # plt.plot(t, x1hat)
                 # plt.xlim([0, 1])
-                plt.title( str(np.mean(yhat[:,-1,0])* (-32.5)) + '(' + str( jnp.abs(np.max(yhat[:,-1,0])- np.min(yhat[:,-1,0])) )  + ')' )
-                plt.ylim([-30,-35])
+                # plt.title( str(np.mean(yhat[:,-1,0])) + '(' + str( jnp.abs(np.max(yhat[:,-1,0])- np.min(yhat[:,-1,0])) )  + ')' )
+                # plt.ylim([0.5, 0.95])
                 # plt.xlim([8,20])
                 plt.xlabel("NMax")
                 plt.ylabel("E (Ground State)")
                 plt.grid(linestyle=":", linewidth=0.5)
-                plt.savefig("Figures/training/plot_"+str(step)+"model_num"+str(model_num)+"_.png", dpi=500)
+                plt.savefig("Figures/training/plot_"+str(step)+"model_num"+str(model_num)+"_nmax"+str(n_points)+"_.png", dpi=500)
                 plt.close()
 
         return params

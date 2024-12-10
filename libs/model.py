@@ -61,47 +61,29 @@ class MLP(eqx.Module):
         else:
             return outfunc(self.output_layers(x))
     
-     
+
+# ----------------------------------------------------------------------------------------------------------
 import numpy as np
 class Func(eqx.Module):
     # mlp: MLP
     scale: MLP
     coeff: MLP
-    position: MLP
+    # position: MLP
     # mlp3: eqx.nn.MLP
     # mlp4: eqx.nn.MLP
     def __init__(self, data_size, width_size, depth, *, key, **kwargs):
         super().__init__(**kwargs)
-        self.scale = MLP(key=key, input_dim=(data_size), out_dim=100, n_layers=depth, hln=width_size)
-        self.coeff = MLP(key=key, input_dim=(data_size), out_dim=100, n_layers=depth, hln=width_size)
-        self.position = MLP(key=key, input_dim=(data_size), out_dim=100, n_layers=depth, hln=width_size)
+        self.scale    = MLP(key=key, input_dim=(data_size), out_dim=100, n_layers=depth, hln=width_size)
+        self.coeff    = MLP(key=key, input_dim=(data_size), out_dim=100, n_layers=depth, hln=width_size)
+        # self.position = MLP(key=key, input_dim=(data_size), out_dim=100, n_layers=depth, hln=width_size)
     def __call__(self, t, y, args):
-        # print(y.shape)
-        exponents= (-1*self.scale(y, outfunc=jnp.exp))+self.coeff(y*jnn.sigmoid(t) ) 
-        track__ = jnp.exp(-1*self.position(y))
-        # print(exponents.shape)
-        out = jnp.mean( track__*jnp.exp( exponents ) ) 
-        # print("before concat", out.shape, y[1].shape)
+        exponents= (-1*self.scale(y, outfunc=jnp.exp))
+        correction = self.coeff(y)
+        out = jnp.mean( correction*jnp.exp(exponents )) 
         out = jnp.array([out, y[1]])
-        # print("after concat", out.shape)
         return out
     
-        # return  self.mlp(y)*jnp.exp(-1*self.mlp2(y, outfunc=jnp.exp)*t  ) \
-        #     +   self.mlp2(y)*jnp.exp(-1*self.mlp2(y, outfunc=jnp.exp)*t**(9/10) ) \
-        #     +   self.mlp(y)*jnp.exp(-1*self.mlp2(y, outfunc=jnp.exp)*t**(8/10) ) \
-        #     +   self.mlp2(y)*jnp.exp(-1*self.mlp2(y, outfunc=jnp.exp)*t**(7/10) )\
-        #     +   self.mlp(y)*jnp.exp(-1*self.mlp3(y, outfunc=jnp.exp)*t**(6/10) ) \
-        #     +   self.mlp2(y)*jnp.exp(-1*self.mlp4(y, outfunc=jnp.exp)*t**(5/10) ) \
-        #     +   self.mlp(y)*jnp.exp(-1*self.mlp3(y, outfunc=jnp.exp)*t**(4/10) )\
-        #     +   self.mlp2(y)*jnp.exp(-1*self.mlp4(y, outfunc=jnp.exp)*t**(3/10) )\
-        #     +   self.mlp(y)*jnp.exp(-1*self.mlp3(y, outfunc=jnp.exp)*t**(2/10) ) \
-        #     +   self.mlp2(y)*jnp.exp(-1*self.mlp4(y, outfunc=jnp.exp)*t**(1/10) ) 
-        #         # +0.25*self.mlp(y)*(jnp.exp(-5*t))\
-        #         # +0.25*self.mlp2(y)*(jnp.exp(-2*t))\
-        #         # +0.25*self.mlp3(y)*(jnp.exp(-t))
-
-
-
+# dy [Nmax]/dNax = sum_{i=1}^{100} coeff_i*exp(-1*NN(y[Nmax], w_i))
 class NeuralODE(eqx.Module):
     func: Func
     def __init__(self, data_size, width_size, depth, *, key, **kwargs):
