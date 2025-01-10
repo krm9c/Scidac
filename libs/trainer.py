@@ -222,8 +222,7 @@ class Trainer(eqx.Module):
         # )
         # linesearch = optax.scale_by_zoom_linesearch(max_linesearch_steps=1000, verbose=True)
         # optim = optax.chain(optim, linesearch)
-        
-        pbar = tqdm(range(n_iter))
+        pbar = tqdm(range(init_step, n_iter), initial=init_step, total=n_iter)
         # value_and_grad_fun = optax.value_and_grad_from_state(return_loss_grad_second)   
         opt_state =optim.init(params)
         for step in pbar:

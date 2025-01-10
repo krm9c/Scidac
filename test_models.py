@@ -274,7 +274,7 @@ def generate_plot(filename, model_name, model_list, num_curves=8, n_points=7):
     plt.xlabel("NMax")
     plt.ylabel("E (Ground State)")
     plt.grid(linestyle=":", linewidth=0.5)
-    plt.legend(title="$\\bar{h}\Omega$", ncol=2, title_fontsize=med, loc='upper left', fancybox=True)
+    plt.legend(title="$\\bar{h}\\Omega$", ncol=2, title_fontsize=med, loc='upper left', fancybox=True)
     # plt.show()
     plt.savefig(filename, dpi=100)
     plt.close()
@@ -381,7 +381,7 @@ def generate_plot_hbar_omega(filename, model_name, model_list, x, n_points=7):
     plt.title("--  True; -  Predicted;  | Uncertainty")
     # plt.ylim([-30, -33])
     # plt.xlim([5, 22.5])
-    plt.xlabel("$\\bar{h}\Omega$ (MeV)" )
+    plt.xlabel("$\\bar{h}\\Omega$ (MeV)" )
     plt.ylabel("E (Ground State)")
     plt.grid(linestyle=":", linewidth=0.5)
     plt.legend(title="$NMax$",ncol=2, title_fontsize=large, loc='lower right', fancybox=True)
@@ -400,7 +400,7 @@ def load_opt_state_from_pkl(pkl_path):
 
 
 ########################################################################################
-def load_checkpoint(path, device="cpu"):
+def load_checkpoint(path, device="cpu", create=True):
     # -----------------------------------------------------------
     trainer = Trainer()
     # key = jax.random.PRNGKey(SEED)
@@ -414,7 +414,7 @@ def load_checkpoint(path, device="cpu"):
     if os.path.exists(path):
         print(f"loaded model {path}")
         model = eqx.tree_deserialise_leaves(path, model)
-    else:
+    elif create:
         print("initialized model from scratch")
         eqx.tree_serialise_leaves(path, model)
     return trainer, model
@@ -450,10 +450,7 @@ if __name__ == "__main__":
 
 
     #----------------------------------------------------------------------------------
-    train_parser = subparsers.add_parser("train")
-    plot_parser = subparsers.add_parser("plot")
     list_parser = subparsers.add_parser("list")
-    plot_parser.add_argument("models_path", help="directory where models are stored")
     list_parser.add_argument("models_path", help="directory where models are stored")
     list_parser.add_argument(
         "-e",
@@ -469,7 +466,6 @@ if __name__ == "__main__":
         action="store_true",
         help="show models where training is incomplete only",
     )
-    
     list_parser.add_argument(
         "-nmax",
         "--n_points",
@@ -477,6 +473,9 @@ if __name__ == "__main__":
         type=int,
         help="number of nmax points to be used in the training",
     )
+
+    plot_parser = subparsers.add_parser("plot")
+    plot_parser.add_argument("models_path", help="directory where models are stored")
     plot_parser.add_argument(
         "-nmax",
         "--n_points",
@@ -485,10 +484,13 @@ if __name__ == "__main__":
         help="number of nmax points to be used in the training",
     )
     
-    
+    train_parser = subparsers.add_parser("train")
     train_parser.add_argument("models_path", help="directory where models are stored")
     train_parser.add_argument(
         "-s", "--save", default=200, type=int, help="frequency of save"
+    )
+    train_parser.add_argument(
+        "-i", "--init-epoch", default=1, type=int, help="start from a specific epoch"
     )
     train_parser.add_argument(
         "-e", "--epochs", default=25000, type=int, help="number of epochs to train for"
@@ -520,10 +522,11 @@ if __name__ == "__main__":
     N_max_constraints = 20
     hbaromega_choose = 8
     repeat = 3
-    init_step=1    
+    init_step=1
     dist_flag=1
-    list_models=[0, 1, 2, 3]
+    list_models=[args.model_num]
     # print("The number of nmax points", args.n_points)
+    
     # -----------------------------------------------------------
     # Get data
     ts_, x, scale_gs, scale_ho, scale_Nmax = return_data(hbaromega_choose)
@@ -538,7 +541,7 @@ if __name__ == "__main__":
         x0 = x[:, 0, :]
         t = ts_.reshape([-1])
         config = {
-            "int_step": init_step,
+            "int_step": 1,
             "N_Max_constraints": N_max_constraints,
             "dist_flag": dist_flag,
             "step": 0,
@@ -548,7 +551,7 @@ if __name__ == "__main__":
         
         for i,num in enumerate(list_models):
             model_name=f"models/MLP__Extrapolation_vdist{hbaromega_choose}_{args.n_points}_{num}.eqx"
-            trainer, model = load_checkpoint(model_name, device="cpu")
+            trainer, model = load_checkpoint(model_name, device="cpu", create=False)
             params, static = eqx.partition(model, eqx.is_array)
             loss_val.append( trainer.loss_fn_mse(params, static, batch) )
         
@@ -560,6 +563,7 @@ if __name__ == "__main__":
     # ----------------------------------------------------------------
     elif args.command == "train":
         # ----------------------------------------------------------------
+        init_step=args.init_epoch
         trainer, model = load_checkpoint(model_path, device="cpu")
         trainer, model = main(
             ts_,
